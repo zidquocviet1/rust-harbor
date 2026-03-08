@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::AppHandle;
-use tauri::Emitter;
 
 pub struct RepoWatcher {
     watcher: Option<Box<dyn Watcher + Send + Sync>>,
@@ -25,7 +24,7 @@ impl RepoWatcher {
             }
         }).map_err(|e| crate::error::Error::SystemError(format!("Failed to create watcher: {}", e)))?;
 
-        for path in paths {
+        for path in &paths {
             // We watch the .git directory directly for state changes
             let git_path = path.join(".git");
             if git_path.exists() {
@@ -39,9 +38,17 @@ impl RepoWatcher {
         // Start a listener thread to emit events to Tauri
         tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
-                // Emit an event to the frontend
-                // The event payload could be more specific (which repo changed?)
-                let _ = app.emit("repo-state-changed", event.paths);
+                // Find which repo this path belongs to
+                for path in event.paths {
+                    for repo_path in &paths {
+                        if path.starts_with(repo_path) {
+                            if let Some(path_str) = repo_path.to_str() {
+                                crate::services::repo_service::update_repo_cache(&app, path_str);
+                            }
+                            break;
+                        }
+                    }
+                }
             }
         });
 
