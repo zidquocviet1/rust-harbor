@@ -1,0 +1,165 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@import "tw-animate-css";
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-sans: 'DM Sans', sans-serif;
+  --radius: 0.85rem;
+
+  /* OLED Optimized Dark Colors */
+  --background: oklch(0.04 0.01 250);
+  --foreground: oklch(0.99 0.01 250);
+  /* Crisper foreground */
+
+  font-size: 17px;
+  /* Increased from default */
+  line-height: 1.6;
+
+  --card: oklch(0.08 0.02 250 / 0.7);
+  --card-foreground: oklch(0.98 0.01 250);
+
+  --popover: oklch(0.08 0.02 250);
+  --popover-foreground: oklch(0.98 0.01 250);
+
+  --primary: oklch(0.6 0.23 260);
+  /* Electric Indigo */
+  --primary-foreground: oklch(0.98 0.01 250);
+
+  --secondary: oklch(0.15 0.02 250);
+  --secondary-foreground: oklch(0.98 0.01 250);
+
+  --muted: oklch(0.12 0.02 250);
+  --muted-foreground: oklch(0.6 0.02 250);
+
+  --accent: oklch(0.15 0.02 250);
+  --accent-foreground: oklch(0.98 0.01 250);
+
+  --destructive: oklch(0.5 0.25 25);
+  --destructive-foreground: oklch(0.98 0.01 250);
+
+  --border: oklch(0.2 0.02 250 / 0.5);
+  --input: oklch(0.2 0.02 250 / 0.5);
+  --ring: oklch(0.6 0.23 260);
+}
+
+.dark {
+  --background: oklch(0.02 0.01 250);
+  /* Near Black */
+  --foreground: oklch(0.98 0.01 250);
+
+  --card: oklch(0.08 0.02 250 / 0.6);
+  --border: oklch(1 0 0 / 10%);
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/30;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Glassmorphism Utilities */
+@layer utilities {
+  .glass {
+    @apply bg-card/60 backdrop-blur-xl border border-white/5 shadow-2xl;
+  }
+
+  .glass-hover {
+    @apply hover:bg-white/10 hover:border-white/20 transition-all duration-300;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 15px currentColor;
+  }
+
+  .bg-grid-white {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='32' height='32' fill='none' stroke='rgb(255 255 255 / 0.04)'%3E%3Cpath d='M0 .5H31.5V32'/%3E%3C/svg%3E");
+  }
+}
+
+/* Animations */
+@keyframes float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Markdown Preview Overrides */
+.prose pre {
+  @apply !p-0 overflow-hidden;
+}
+
+.prose pre code {
+  @apply block p-8 text-[14px] leading-relaxed font-mono;
+}
+
+.prose h1,
+.prose h2,
+.prose h3 {
+  @apply text-foreground font-black tracking-tight;
+}
+
+.prose p {
+  @apply mb-6;
+}
+
+.prose ul,
+.prose ol {
+  @apply my-6 list-outside;
+}
+
+.prose li {
+  @apply mb-2 pl-2;
+}
+
+:global(.sonner-toast) {
+  background-color: var(--card) !important;
+  backdrop-filter: blur(24px) !important;
+  border: 1px solid oklch(1 0 0 / 10%) !important;
+  box-shadow: var(--shadow-2xl) !important;
+}
