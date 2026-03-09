@@ -61,7 +61,7 @@ export async function deleteTag(id: number) {
     await invoke('delete_tag', { id });
     selectedTagIds.update((ids) => {
       ids.delete(id);
-      return ids;
+      return new Set(ids);
     });
     await loadTags();
   } catch (e) {
@@ -108,4 +108,3 @@ if (typeof window !== 'undefined') {
     loadTags();
   });
 }
-

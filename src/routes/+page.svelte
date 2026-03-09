@@ -36,8 +36,47 @@
   import hljs from 'highlight.js';
   import 'highlight.js/styles/github-dark.css';
   import GroupHeader from "$lib/components/custom/GroupHeader.svelte";
+  import type { SimpleIcon } from "simple-icons";
+  import {
+    siC,
+    siClojure,
+    siCplusplus,
+    siCss,
+    siDart,
+    siDocker,
+    siDotnet,
+    siElixir,
+    siFsharp,
+    siGo,
+    siHaskell,
+    siHtml5,
+    siJavascript,
+    siJson,
+    siKotlin,
+    siLua,
+    siMarkdown,
+    siNixos,
+    siOpenjdk,
+    siPerl,
+    siPhp,
+    siPython,
+    siR,
+    siReact,
+    siRuby,
+    siRust,
+    siScala,
+    siShell,
+    siSvelte,
+    siSwift,
+    siToml,
+    siTypescript,
+    siVuedotjs,
+    siYaml,
+    siZig
+  } from "simple-icons";
   import { 
     allTags, 
+    tagLoading,
     selectedTagIds,
     activeTagFilters,
     assignTag,
@@ -61,6 +100,59 @@
     tags: string[];
   }
 
+  const LANGUAGE_ICON_MAP: Record<string, SimpleIcon> = {
+    "rust": siRust,
+    "typescript": siTypescript,
+    "javascript": siJavascript,
+    "python": siPython,
+    "go": siGo,
+    "c": siC,
+    "c++": siCplusplus,
+    "c#": siDotnet,
+    "f#": siFsharp,
+    "java": siOpenjdk,
+    "kotlin": siKotlin,
+    "swift": siSwift,
+    "dart": siDart,
+    "php": siPhp,
+    "ruby": siRuby,
+    "scala": siScala,
+    "haskell": siHaskell,
+    "elixir": siElixir,
+    "clojure": siClojure,
+    "lua": siLua,
+    "r": siR,
+    "perl": siPerl,
+    "svelte": siSvelte,
+    "react": siReact,
+    "jsx": siReact,
+    "tsx": siReact,
+    "vue": siVuedotjs,
+    "vue.js": siVuedotjs,
+    "html": siHtml5,
+    "html5": siHtml5,
+    "css": siCss,
+    "scss": siCss,
+    "less": siCss,
+    "shell": siShell,
+    "bash": siShell,
+    "zsh": siShell,
+    "powershell": siShell,
+    "dockerfile": siDocker,
+    "yaml": siYaml,
+    "yml": siYaml,
+    "json": siJson,
+    "markdown": siMarkdown,
+    "md": siMarkdown,
+    "toml": siToml,
+    "nix": siNixos,
+    "zig": siZig
+  };
+
+  function getLanguageIcon(name: string): SimpleIcon | null {
+    return LANGUAGE_ICON_MAP[name.trim().toLowerCase()] ?? null;
+  }
+
   let repos = $state<RepoMetadata[]>([]);
   let searchQuery = $state("");
   let selectedLanguages = $state<string[]>([]);
@@ -79,6 +171,7 @@
   let unlistenEnd: UnlistenFn;
   let tagPopoverRepo: RepoMetadata | null = $state(null);
   let tagPopoverOpen = $state(false);
+  let tagPopoverPosition = $state<{ top: number; left: number } | null>(null);
   let groupByMode = $state<'none' | 'language'>('none');
   let collapsedGroups = $state<Set<string>>(new Set());
   let appConfig = $state<{ watched_folders: string[]; group_by_mode?: string | null } | null>(null);
@@ -191,6 +284,27 @@
       }
     }
     return result;
+  });
+
+  // Keep repo tag badges in sync when a tag is deleted or renamed globally.
+  $effect(() => {
+    if ($tagLoading) return;
+
+    const validTagNames = new Set($allTags.map((t) => t.name));
+    let changed = false;
+
+    const nextRepos = repos.map((repo) => {
+      const filteredTags = (repo.tags || []).filter((tag) => validTagNames.has(tag));
+      if (filteredTags.length !== (repo.tags || []).length) {
+        changed = true;
+        return { ...repo, tags: filteredTags };
+      }
+      return repo;
+    });
+
+    if (changed) {
+      repos = nextRepos;
+    }
   });
 
   function toggleLanguage(lang: string) {
@@ -331,14 +445,27 @@
     collapsedGroups = next;
   }
 
-  function openTagPopover(repo: RepoMetadata) {
+  function openTagPopover(repo: RepoMetadata, anchorEl: HTMLElement) {
     tagPopoverRepo = repo;
+    const rect = anchorEl.getBoundingClientRect();
+    const popoverWidth = 288; // w-72
+    const gap = 10;
+    const viewportPadding = 12;
+
+    const left = Math.min(
+      Math.max(rect.right - popoverWidth, viewportPadding),
+      window.innerWidth - popoverWidth - viewportPadding
+    );
+    const top = Math.max(rect.top - gap, viewportPadding);
+
+    tagPopoverPosition = { top, left };
     tagPopoverOpen = true;
   }
 
   function closeTagPopover() {
     tagPopoverOpen = false;
     tagPopoverRepo = null;
+    tagPopoverPosition = null;
   }
 
   function repoHasTag(repo: RepoMetadata, tag: StoreTag) {
@@ -362,6 +489,10 @@
           ? { ...r, tags: tagNames }
           : r
       );
+
+      if (tagPopoverRepo?.path === repo.path) {
+        tagPopoverRepo = { ...repo, tags: tagNames };
+      }
     } catch (e: any) {
       const message = typeof e === "string" ? e : (e?.message || "Failed to update tag");
       toast.error(message);
@@ -414,11 +545,17 @@
 
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap gap-1.5 min-h-[24px]">
-            {#each Object.entries(repo.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 3) as [lang, count]}
-              <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground/80">
-                {lang}
-              </Badge>
-            {/each}
+          {#each Object.entries(repo.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 3) as [lang, count]}
+            {@const icon = getLanguageIcon(lang)}
+            <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground/80">
+              {#if icon}
+                <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1 inline-block align-[-2px]" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                  <path fill="currentColor" d={icon.path}></path>
+                </svg>
+              {/if}
+              {lang}
+            </Badge>
+          {/each}
             {#if Object.keys(repo.languages || {}).length > 3}
               <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black">
                 +{Object.keys(repo.languages).length - 3}
@@ -521,7 +658,7 @@
               variant="ghost"
               size="icon"
               class="rounded-full hover:bg-primary/10 hover:text-primary"
-              onclick={() => openTagPopover(repo)}
+              onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
             >
               <Tag class="w-4 h-4" />
             </Button>
@@ -540,7 +677,15 @@
               <h3 class="font-bold truncate text-sm tracking-tight">{repo.name}</h3>
               <div class="flex gap-1">
                 {#each Object.keys(repo.languages || {}).slice(0, 2) as lang}
-                  <span class="text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/5 text-muted-foreground font-black uppercase tracking-widest rounded-md">{lang}</span>
+                  {@const icon = getLanguageIcon(lang)}
+                  <span class="inline-flex items-center text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/5 text-muted-foreground font-black uppercase tracking-widest rounded-md">
+                    {#if icon}
+                      <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                        <path fill="currentColor" d={icon.path}></path>
+                      </svg>
+                    {/if}
+                    {lang}
+                  </span>
                 {/each}
               </div>
             </div>
@@ -614,7 +759,7 @@
             variant="ghost"
             size="icon"
             class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary transition-all"
-            onclick={() => openTagPopover(repo)}
+            onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
           >
             <Tag class="w-4 h-4" />
           </Button>
@@ -688,11 +833,17 @@
           </button>
           
           {#each visibleLanguages as lang}
+            {@const icon = getLanguageIcon(lang.name)}
             <button 
               onclick={() => toggleLanguage(lang.name)}
               class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border whitespace-nowrap {selectedLanguages.includes(lang.name) ? 'bg-white/10 text-primary border-primary/40 shadow-glow' : 'hover:bg-white/5 text-muted-foreground border-transparent'}"
             >
               <div class="flex items-center gap-2">
+                {#if icon}
+                  <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
+                    <path fill="currentColor" d={icon.path}></path>
+                  </svg>
+                {/if}
                 {lang.name}
                 <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
                 {#if selectedLanguages.includes(lang.name)}
@@ -721,11 +872,17 @@
                   </div>
                   <div class="max-h-64 overflow-y-auto space-y-1 custom-scrollbar pr-1">
                     {#each hiddenLanguages as lang}
+                      {@const icon = getLanguageIcon(lang.name)}
                       <button 
                         onclick={(e) => { e.stopPropagation(); toggleLanguage(lang.name); showLanguageDropdown = false; }}
                         class="w-full text-left px-3 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all flex items-center justify-between group {selectedLanguages.includes(lang.name) ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}"
                       >
                         <div class="flex items-center gap-2 truncate">
+                          {#if icon}
+                            <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
+                              <path fill="currentColor" d={icon.path}></path>
+                            </svg>
+                          {/if}
                           <span>{lang.name}</span>
                           <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
                         </div>
@@ -837,7 +994,7 @@
   {/if}
 </div>
 
-{#if tagPopoverOpen && tagPopoverRepo}
+{#if tagPopoverOpen && tagPopoverRepo && tagPopoverPosition}
   <button 
     type="button"
     class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[80]"
@@ -845,7 +1002,8 @@
     aria-label="Close tag selector"
   ></button>
   <div
-    class="fixed top-24 right-16 w-72 bg-background/95 border border-white/10 rounded-2xl shadow-2xl z-[81] p-4 space-y-3 animate-in fade-in zoom-in-95 slide-in-from-right-2 duration-200"
+    class="fixed w-72 bg-background/95 border border-white/10 rounded-2xl shadow-2xl z-[81] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-200"
+    style={`top: ${tagPopoverPosition.top}px; left: ${tagPopoverPosition.left}px; transform: translateY(-100%);`}
     use:clickOutside={closeTagPopover}
   >
     <div class="flex items-center justify-between mb-1">
@@ -992,8 +1150,15 @@
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Manifested Artifacts</h3>
                <div class="flex flex-wrap gap-2.5">
                  {#each Object.entries(selectedRepoForPreview.languages).sort((a, b) => b[1] - a[1]) as [lang, count]}
+                   {@const icon = getLanguageIcon(lang)}
                    <div class="bg-white/[0.03] px-5 py-3 rounded-2xl border border-white/5 flex items-center gap-4 hover:border-primary/20 transition-colors">
-                     <div class="w-2 h-2 rounded-full bg-primary/40"></div>
+                     {#if icon}
+                       <svg viewBox="0 0 24 24" class="w-4 h-4 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                         <path fill="currentColor" d={icon.path}></path>
+                       </svg>
+                     {:else}
+                       <div class="w-2 h-2 rounded-full bg-primary/40"></div>
+                     {/if}
                      <span class="text-xs font-bold uppercase tracking-wider">{lang}</span>
                      <span class="text-[9px] font-black p-1 bg-white/5 rounded border border-white/5 text-muted-foreground">{count}</span>
                    </div>
@@ -1030,4 +1195,3 @@
     </div>
   </div>
 {/if}
-

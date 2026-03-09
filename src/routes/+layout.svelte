@@ -31,6 +31,8 @@
   let renameValue = $state("");
   let contextMenuTag: Tag | null = $state(null);
   let contextMenuPosition = $state<{ x: number; y: number } | null>(null);
+  let pendingDeleteTag: Tag | null = $state(null);
+  let showDeleteDialog = $state(false);
 
   onMount(async () => {
     try {
@@ -93,7 +95,7 @@
     }
   }
 
-  async function confirmDelete(tag: Tag) {
+  async function performDelete(tag: Tag) {
     try {
       await deleteTag(tag.id);
       toast.success("Tag deleted");
@@ -101,8 +103,8 @@
       const message = typeof e === "string" ? e : (e?.message || "Failed to delete tag");
       toast.error(message);
     } finally {
-      contextMenuTag = null;
-      contextMenuPosition = null;
+      pendingDeleteTag = null;
+      showDeleteDialog = false;
     }
   }
 
@@ -350,4 +352,66 @@
     </div>
   {/if}
 </main>
+
+{#if contextMenuTag && contextMenuPosition}
+  <div 
+    class="fixed inset-0 z-[90]"
+    onclick={closeContextMenu}
+  ></div>
+  <div
+    class="fixed z-[91] w-40 bg-background/95 border border-white/10 rounded-xl shadow-xl py-1 text-xs"
+    style={`top: ${contextMenuPosition.y}px; left: ${contextMenuPosition.x}px;`}
+  >
+    <button
+      type="button"
+      class="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
+      onclick={() => { openRename(contextMenuTag); closeContextMenu(); }}
+    >
+      <span>Rename</span>
+    </button>
+    <button
+      type="button"
+      class="w-full px-3 py-1.5 text-left hover:bg-destructive/10 text-destructive"
+      onclick={() => {
+        if (contextMenuTag) {
+          pendingDeleteTag = contextMenuTag;
+          showDeleteDialog = true;
+          closeContextMenu();
+        }
+      }}
+    >
+      <span>Delete</span>
+    </button>
+  </div>
+{/if}
+
+{#if showDeleteDialog && pendingDeleteTag}
+  <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[95] flex items-center justify-center">
+    <div class="bg-background/95 border border-white/10 rounded-2xl shadow-2xl p-5 w-[320px] space-y-4">
+      <div class="space-y-1">
+        <p class="text-sm font-semibold">Delete tag</p>
+        <p class="text-xs text-muted-foreground">
+          Are you sure you want to delete tag "<span class="font-mono">{pendingDeleteTag.name}</span>"?
+          This will remove it from all repositories.
+        </p>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.2em] text-muted-foreground hover:bg-white/5"
+          onclick={() => { showDeleteDialog = false; pendingDeleteTag = null; }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.2em] bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          onclick={() => pendingDeleteTag && performDelete(pendingDeleteTag)}
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
