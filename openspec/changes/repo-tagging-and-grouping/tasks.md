@@ -40,56 +40,56 @@
 
 ## 6. Sidebar Tag Navigation UI
 
-- [ ] 6.1 Add a collapsible "Tags" section in `+layout.svelte` between the nav links and the status footer
-- [ ] 6.2 Design the section header with "Tags" label, repo count badge, collapse/expand chevron with smooth rotation animation, and "+" create button
-- [ ] 6.3 Render the tag list — each item shows a colour dot, tag name, and repo count badge. Apply glassmorphism styling consistent with the existing sidebar design
-- [ ] 6.4 Implement click-to-filter: clicking a tag toggles it in `selectedTagIds` store; selected tags get highlighted with `bg-primary/20` and ring accent
-- [ ] 6.5 Implement "All" button/link at the top of tag list to clear tag filter
-- [ ] 6.6 Implement the inline create popover: text input + colour palette grid + confirm button. Opens on "+" click
-- [ ] 6.7 Implement right-click context menu on each tag with "Rename" and "Delete" options
-- [ ] 6.8 Implement inline rename (input replaces tag name on context menu "Rename")
-- [ ] 6.9 Implement delete with confirmation toast/prompt
-- [ ] 6.10 Add smooth enter/exit animations for tags appearing/disappearing in the list
-- [ ] 6.11 Handle empty state — show "Create your first tag" prompt with a subtle icon
+- [x] 6.1 Add a collapsible "Tags" section in `+layout.svelte` between the nav links and the status footer
+- [x] 6.2 Design the section header with "Tags" label, repo count badge, collapse/expand chevron with smooth rotation animation, and "+" create button
+- [x] 6.3 Render the tag list — each item shows a colour dot, tag name, and repo count badge. Apply glassmorphism styling consistent with the existing sidebar design
+- [x] 6.4 Implement click-to-filter: clicking a tag toggles it in `selectedTagIds` store; selected tags get highlighted with `bg-primary/20` and ring accent
+- [x] 6.5 Implement "All" button/link at the top of tag list to clear tag filter
+- [x] 6.6 Implement the inline create popover: text input + colour palette grid + confirm button. Opens on "+" click
+- [x] 6.7 Implement right-click context menu on each tag with "Rename" and "Delete" options
+- [x] 6.8 Implement inline rename (input replaces tag name on context menu "Rename")
+- [x] 6.9 Implement delete with confirmation toast/prompt
+- [x] 6.10 Add smooth enter/exit animations for tags appearing/disappearing in the list
+- [x] 6.11 Handle empty state — show "Create your first tag" prompt with a subtle icon
 
 ## 7. Repo Card Tag Display & Assignment
 
-- [ ] 7.1 Display tag badges on repo cards (grid view) — show up to 3 tags as small colour-coded badges below the language badges, with "+N" overflow
-- [ ] 7.2 Display tag badges on repo list items (list view) — inline small badges after the language badges
-- [ ] 7.3 Create a tag assignment popover component — triggered by a "Tag" button or icon on the repo card. Shows all available tags as a checklist with checkmarks for currently assigned tags
-- [ ] 7.4 Wire popover toggle/assign/unassign actions to tagStore functions
-- [ ] 7.5 Ensure tag badges in the card link visually to sidebar colours (same colour dot)
+- [x] 7.1 Display tag badges on repo cards (grid view) — show up to 3 tags as small colour-coded badges below the language badges, with "+N" overflow
+- [x] 7.2 Display tag badges on repo list items (list view) — inline small badges after the language badges
+- [x] 7.3 Create a tag assignment popover component — triggered by a "Tag" button or icon on the repo card. Shows all available tags as a checklist with checkmarks for currently assigned tags
+- [x] 7.4 Wire popover toggle/assign/unassign actions to tagStore functions
+- [x] 7.5 Ensure tag badges in the card link visually to sidebar colours (same colour dot)
 
 ## 8. Filter Integration
 
-- [ ] 8.1 In `+page.svelte`, subscribe to `selectedTagIds` from the tag store
-- [ ] 8.2 Extend the `filteredRepos` derived block to also filter by selected tags — a repo passes if it has ANY of the selected tags (OR logic), or if no tags are selected
-- [ ] 8.3 Ensure tag filter works in combination with search query and language filter
+- [x] 8.1 In `+page.svelte`, subscribe to `selectedTagIds` from the tag store
+- [x] 8.2 Extend the `filteredRepos` derived block to also filter by selected tags — a repo passes if it has ANY of the selected tags (OR logic), or if no tags are selected
+- [x] 8.3 Ensure tag filter works in combination with search query and language filter
 
 ## 9. Group-By Framework/Language
 
-- [ ] 9.1 Add a "Group By" dropdown/toggle button in the toolbar (next to the grid/list toggle). Options: "None" (default), "Language"
-- [ ] 9.2 Create a `groupByMode` state variable (persisted to config via `set_config`/`get_config`)
-- [ ] 9.3 Create a `groupedRepos` derived block that groups `filteredRepos` by primary language (highest file count). Repos with no languages go under "Other". Sort groups alphabetically
-- [ ] 9.4 Create `GroupHeader.svelte` component — sticky section header with group name, repo count, and collapse/expand chevron. Styled with glassmorphism matching existing cards
-- [ ] 9.5 Implement collapse/expand state per group using a `collapsedGroups` Set state variable
-- [ ] 9.6 Render the grouped layout: when `groupByMode === 'language'`, iterate `groupedRepos` and render `GroupHeader` + repo cards/rows within each section. Support both grid and list view modes
-- [ ] 9.7 Add smooth slide animation for collapse/expand transitions
-- [ ] 9.8 Implement sticky header behaviour for group headers during scroll
-- [ ] 9.9 Hide groups that have zero repos after filtering
+- [x] 9.1 Add a "Group By" dropdown/toggle button in the toolbar (next to the grid/list toggle). Options: "None" (default), "Language"
+- [x] 9.2 Create a `groupByMode` state variable (persisted to config via `set_config`/`get_config`)
+- [x] 9.3 Create a `groupedRepos` derived block that groups `filteredRepos` by primary language (highest file count). Repos with no languages go under "Other". Sort groups alphabetically
+- [x] 9.4 Create `GroupHeader.svelte` component — sticky section header with group name, repo count, and collapse/expand chevron. Styled with glassmorphism matching existing cards
+- [x] 9.5 Implement collapse/expand state per group using a `collapsedGroups` Set state variable
+- [x] 9.6 Render the grouped layout: when `groupByMode === 'language'`, iterate `groupedRepos` and render `GroupHeader` + repo cards/rows within each section. Support both grid and list view modes
+- [x] 9.7 Add smooth slide animation for collapse/expand transitions
+- [x] 9.8 Implement sticky header behaviour for group headers during scroll
+- [x] 9.9 Hide groups that have zero repos after filtering
 
 ## 10. Config Persistence for New Preferences
 
 - [x] 10.1 Extend `AppConfig` struct in `src-tauri/src/config/mod.rs` with `group_by_mode: Option<String>` field (default `None`)
-- [ ] 10.2 Load and apply `group_by_mode` preference on page mount
-- [ ] 10.3 Save `group_by_mode` preference when user changes it
+- [x] 10.2 Load and apply `group_by_mode` preference on page mount
+- [x] 10.3 Save `group_by_mode` preference when user changes it
 
 ## 11. Polish & Testing
 
-- [ ] 11.1 Verify tag CRUD operations work end-to-end (create, assign, rename, delete, cleanup)
-- [ ] 11.2 Verify sidebar tag filtering works with search and language filters simultaneously
-- [ ] 11.3 Verify grouped view renders correctly in both grid and list modes
-- [ ] 11.4 Verify collapse/expand animations are smooth and sticky headers work
-- [ ] 11.5 Verify tag data survives app restart (SQLite persistence)
-- [ ] 11.6 Verify orphan cleanup runs when watched folders change
-- [ ] 11.7 Run `cargo build` and `npm run build` to confirm no compilation errors
+- [x] 11.1 Verify tag CRUD operations work end-to-end (create, assign, rename, delete, cleanup)
+- [x] 11.2 Verify sidebar tag filtering works with search and language filters simultaneously
+- [x] 11.3 Verify grouped view renders correctly in both grid and list modes
+- [x] 11.4 Verify collapse/expand animations are smooth and sticky headers work
+- [x] 11.5 Verify tag data survives app restart (SQLite persistence)
+- [x] 11.6 Verify orphan cleanup runs when watched folders change
+- [x] 11.7 Run `cargo build` and `npm run build` to confirm no compilation errors

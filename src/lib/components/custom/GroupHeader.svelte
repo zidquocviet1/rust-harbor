@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { slide } from "svelte/transition";
 
   let {
     label,
@@ -58,25 +59,9 @@
     </div>
   </header>
 
-  <div class:collapsed={collapsed} class="group-content overflow-hidden transition-all duration-300">
-    {#if !collapsed}
-      <div class="pt-2">
-        {@render children()}
-      </div>
-    {/if}
-  </div>
+  {#if !collapsed}
+    <div class="overflow-hidden pt-2" transition:slide={{ duration: 220 }}>
+      {@render children()}
+    </div>
+  {/if}
 </section>
-
-<style>
-  .group-content.collapsed {
-    max-height: 0;
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  .group-content:not(.collapsed) {
-    max-height: 999px;
-    opacity: 1;
-    transform: translateY(0);
-  }
-</style>
-

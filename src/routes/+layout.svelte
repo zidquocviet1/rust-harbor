@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { onMount, type Snippet } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from "svelte-sonner";
   import GitMissingError from '$lib/components/custom/GitMissingError.svelte';
@@ -296,12 +297,14 @@
                   </div>
 
                   <div class="space-y-1 max-h-64 overflow-y-auto pr-1">
-                    {#each $allTags as tag}
+                    {#each $allTags as tag (tag.id)}
                       {@const isSelected = $selectedTagIds.has(tag.id)}
                       <button
-                        class="w-full flex items-center justify-between px-4 py-2 rounded-lg text-xs transition-all border {isSelected ? 'bg-primary/15 border-primary/50 text-primary shadow-glow' : 'bg-white/3 border-transparent hover:bg-white/8 text-muted-foreground'}"
+                        class="w-full flex items-center justify-between px-4 py-2 rounded-lg text-xs transition-all border {isSelected ? 'bg-primary/20 border-primary/50 ring-1 ring-primary/40 text-primary shadow-glow' : 'bg-white/3 border-transparent hover:bg-white/8 text-muted-foreground'}"
                         onclick={() => toggleTagFilter(tag.id)}
                         oncontextmenu={(e) => handleTagContextMenu(e as MouseEvent, tag)}
+                        in:fly={{ y: -8, duration: 180 }}
+                        out:fade={{ duration: 120 }}
                       >
                         <div class="flex items-center gap-2 min-w-0">
                           <span
@@ -414,4 +417,3 @@
     </div>
   </div>
 {/if}
-
