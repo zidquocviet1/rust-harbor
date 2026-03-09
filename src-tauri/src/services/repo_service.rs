@@ -67,6 +67,7 @@ pub fn get_repo_metadata(path: &Path) -> Option<RepoMetadata> {
         remote_reachable,
         last_modified,
         languages,
+        tags: vec![],
     })
 }
 

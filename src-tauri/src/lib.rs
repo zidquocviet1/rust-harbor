@@ -4,9 +4,11 @@ pub mod config;
 pub mod controllers;
 pub mod services;
 
-use crate::controllers::{repo, settings};
+use crate::controllers::{repo, settings, tags};
 use crate::services::watcher::RepoWatcher;
+use crate::services::database;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
 #[tauri::command]
@@ -28,6 +30,13 @@ pub fn run() {
         .manage(repo::ScanStatus(std::sync::atomic::AtomicBool::new(false)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // Initialise the SQLite database and register as managed state
+            let db_pool = database::init_database(app.handle())
+                .expect("Failed to initialise database");
+            app.manage(db_pool);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             is_git_installed,
             repo::list_repos,
@@ -38,7 +47,14 @@ pub fn run() {
             repo::git_pull,
             repo::git_push,
             settings::get_config,
-            settings::set_config
+            settings::set_config,
+            tags::list_tags,
+            tags::create_tag,
+            tags::rename_tag,
+            tags::delete_tag,
+            tags::assign_tag,
+            tags::remove_tag,
+            tags::get_repo_tags,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
