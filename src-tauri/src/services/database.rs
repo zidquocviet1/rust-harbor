@@ -5,13 +5,13 @@ use std::sync::Mutex;
 /// Wrapper around a SQLite connection managed as Tauri state.
 pub struct DbPool(pub Mutex<Connection>);
 
-/// Returns the path to the `harbor.db` file inside the Tauri app data directory.
+/// Returns the path to the `harbor.db` file alongside the app config (stable across restarts).
 pub fn get_db_path(app_handle: &tauri::AppHandle) -> crate::error::Result<PathBuf> {
     use tauri::Manager;
     let mut path = app_handle
         .path()
-        .app_data_dir()
-        .map_err(|e| crate::error::Error::SystemError(format!("Failed to get app data dir: {}", e)))?;
+        .app_config_dir()
+        .map_err(|e| crate::error::Error::SystemError(format!("Failed to get config dir: {}", e)))?;
 
     if !path.exists() {
         std::fs::create_dir_all(&path)?;
