@@ -5,6 +5,8 @@ use std::fs;
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub watched_folders: Vec<String>,
+    #[serde(default)]
+    pub group_by_mode: Option<String>,
 }
 
 fn get_config_path(app_handle: &tauri::AppHandle) -> crate::error::Result<PathBuf> {

@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::services::scanner::scan_for_repos;
 use crate::services::watcher::WatcherState;
 use crate::services::repo_service::{get_repo_metadata, update_repo_cache};
+use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags};
 use crate::models::repo::RepoMetadata;
 use tauri::{AppHandle, Manager, Emitter};
 use serde::Serialize;
@@ -71,9 +72,26 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
             }
 
             // Parallel processing with Rayon for repos
-            let processed_repos: Vec<RepoMetadata> = repos_paths.par_iter().filter_map(|path| {
+            let mut processed_repos: Vec<RepoMetadata> = repos_paths.par_iter().filter_map(|path| {
                 get_repo_metadata(path)
             }).collect();
+
+            // Batch-fetch tags from SQLite and merge into metadata
+            let db = app_clone.state::<DbPool>();
+            if let Ok(conn) = db.0.lock() {
+                // Fetch all tag assignments
+                if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
+                    for repo in &mut processed_repos {
+                        if let Some(tags) = tag_map.get(&repo.path) {
+                            repo.tags = tags.clone();
+                        }
+                    }
+                }
+
+                // Cleanup orphaned repo_tags entries
+                let valid_paths: Vec<String> = processed_repos.iter().map(|r| r.path.clone()).collect();
+                let _ = cleanup_orphaned_tags(&conn, &valid_paths);
+            }
 
             // Update global cache
             cache.0.clear();

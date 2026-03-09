@@ -21,6 +21,7 @@
     "fuse.js": "^7.1.0",
     "highlight.js": "^11.11.1",
     "lucide-svelte": "^0.577.0",
+    "simple-icons": "^16.11.0",
     "svelte-sonner": "^1.0.8"
   },
   "devDependencies": {

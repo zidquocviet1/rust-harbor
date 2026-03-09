@@ -20,4 +20,5 @@ pub struct RepoMetadata {
     pub remote_reachable: bool,
     pub last_modified: i64,
     pub languages: std::collections::HashMap<String, usize>,
+    pub tags: Vec<String>,
 }

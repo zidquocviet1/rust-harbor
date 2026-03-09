@@ -6,6 +6,7 @@ pub enum Error {
     IoError(String),
     ConfigError(String),
     SystemError(String),
+    DbError(String),
 }
 
 impl From<git2::Error> for Error {
@@ -17,6 +18,12 @@ impl From<git2::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error::IoError(err.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for Error {
+    fn from(err: rusqlite::Error) -> Self {
+        Error::DbError(err.to_string())
     }
 }
 

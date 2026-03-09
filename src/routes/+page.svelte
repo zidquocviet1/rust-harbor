@@ -29,11 +29,61 @@
     Check,
     X,
     FileText,
-    Eye
+    Eye,
+    Tag
   } from "lucide-svelte";
   import { tick } from "svelte";
   import hljs from 'highlight.js';
   import 'highlight.js/styles/github-dark.css';
+  import GroupHeader from "$lib/components/custom/GroupHeader.svelte";
+  import type { SimpleIcon } from "simple-icons";
+  import {
+    siC,
+    siClojure,
+    siCplusplus,
+    siCss,
+    siDart,
+    siDocker,
+    siDotnet,
+    siElixir,
+    siFsharp,
+    siGo,
+    siHaskell,
+    siHtml5,
+    siJavascript,
+    siJson,
+    siKotlin,
+    siLua,
+    siMarkdown,
+    siNixos,
+    siOpenjdk,
+    siPerl,
+    siPhp,
+    siPython,
+    siR,
+    siReact,
+    siRuby,
+    siRust,
+    siScala,
+    siShell,
+    siSvelte,
+    siSwift,
+    siToml,
+    siTypescript,
+    siVuedotjs,
+    siYaml,
+    siZig
+  } from "simple-icons";
+  import { 
+    allTags, 
+    tagLoading,
+    selectedTagIds,
+    activeTagFilters,
+    assignTag,
+    removeTag,
+    loadTags,
+    type Tag as StoreTag
+  } from "$lib/stores/tagStore";
 
   type SyncStatus = 'Clean' | 'Ahead' | 'Dirty' | 'Behind' | 'Diverged';
 
@@ -47,6 +97,60 @@
     remote_reachable: boolean;
     last_modified: number;
     languages: Record<string, number>;
+    tags: string[];
+  }
+
+  const LANGUAGE_ICON_MAP: Record<string, SimpleIcon> = {
+    "rust": siRust,
+    "typescript": siTypescript,
+    "javascript": siJavascript,
+    "python": siPython,
+    "go": siGo,
+    "c": siC,
+    "c++": siCplusplus,
+    "c#": siDotnet,
+    "f#": siFsharp,
+    "java": siOpenjdk,
+    "kotlin": siKotlin,
+    "swift": siSwift,
+    "dart": siDart,
+    "php": siPhp,
+    "ruby": siRuby,
+    "scala": siScala,
+    "haskell": siHaskell,
+    "elixir": siElixir,
+    "clojure": siClojure,
+    "lua": siLua,
+    "r": siR,
+    "perl": siPerl,
+    "svelte": siSvelte,
+    "react": siReact,
+    "jsx": siReact,
+    "tsx": siReact,
+    "vue": siVuedotjs,
+    "vue.js": siVuedotjs,
+    "html": siHtml5,
+    "html5": siHtml5,
+    "css": siCss,
+    "scss": siCss,
+    "less": siCss,
+    "shell": siShell,
+    "bash": siShell,
+    "zsh": siShell,
+    "powershell": siShell,
+    "dockerfile": siDocker,
+    "yaml": siYaml,
+    "yml": siYaml,
+    "json": siJson,
+    "markdown": siMarkdown,
+    "md": siMarkdown,
+    "toml": siToml,
+    "nix": siNixos,
+    "zig": siZig
+  };
+
+  function getLanguageIcon(name: string): SimpleIcon | null {
+    return LANGUAGE_ICON_MAP[name.trim().toLowerCase()] ?? null;
   }
 
   let repos = $state<RepoMetadata[]>([]);
@@ -65,6 +169,12 @@
   let unlistenState: UnlistenFn;
   let unlistenStart: UnlistenFn;
   let unlistenEnd: UnlistenFn;
+  let tagPopoverRepo: RepoMetadata | null = $state(null);
+  let tagPopoverOpen = $state(false);
+  let tagPopoverPosition = $state<{ top: number; left: number } | null>(null);
+  let groupByMode = $state<'none' | 'language'>('none');
+  let collapsedGroups = $state<Set<string>>(new Set());
+  let appConfig = $state<{ watched_folders: string[]; group_by_mode?: string | null } | null>(null);
 
   async function openPreview(repo: RepoMetadata) {
     selectedRepoForPreview = repo;
@@ -139,7 +249,62 @@
       );
     }
     
+    const selectedTagNames = $activeTagFilters;
+    if (selectedTagNames.length > 0) {
+      result = result.filter(r => 
+        r.tags && r.tags.some(tag => selectedTagNames.includes(tag))
+      );
+    }
+    
     return result;
+  });
+
+  const groupedRepos = $derived.by(() => {
+    if (groupByMode !== 'language') return {};
+    const groups: Record<string, RepoMetadata[]> = {};
+
+    for (const repo of filteredRepos) {
+      const entries = Object.entries(repo.languages || {});
+      let key = "Other";
+      if (entries.length > 0) {
+        entries.sort((a, b) => b[1] - a[1]);
+        const topCount = entries[0][1];
+        const tied = entries.filter(([_, c]) => c === topCount).map(([lang]) => lang).sort();
+        key = tied[0];
+      }
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(repo);
+    }
+
+    const sortedKeys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    const result: Record<string, RepoMetadata[]> = {};
+    for (const k of sortedKeys) {
+      if (groups[k].length > 0) {
+        result[k] = groups[k];
+      }
+    }
+    return result;
+  });
+
+  // Keep repo tag badges in sync when a tag is deleted or renamed globally.
+  $effect(() => {
+    if ($tagLoading) return;
+
+    const validTagNames = new Set($allTags.map((t) => t.name));
+    let changed = false;
+
+    const nextRepos = repos.map((repo) => {
+      const filteredTags = (repo.tags || []).filter((tag) => validTagNames.has(tag));
+      if (filteredTags.length !== (repo.tags || []).length) {
+        changed = true;
+        return { ...repo, tags: filteredTags };
+      }
+      return repo;
+    });
+
+    if (changed) {
+      repos = nextRepos;
+    }
   });
 
   function toggleLanguage(lang: string) {
@@ -229,6 +394,16 @@
 
   onMount(async () => {
     await loadRepos();
+    await loadTags();
+    try {
+      const config = await invoke<any>("get_config");
+      appConfig = config;
+      if (config?.group_by_mode === "language") {
+        groupByMode = 'language';
+      }
+    } catch (e) {
+      console.error("Failed to load config:", e);
+    }
     isScanning = await invoke("is_scanning");
     unlistenState = await listen("repo-state-changed", () => loadRepos());
     unlistenStart = await listen("scan-started", () => {
@@ -245,7 +420,387 @@
     if (unlistenStart) unlistenStart();
     if (unlistenEnd) unlistenEnd();
   });
+
+  async function setGroupByMode(mode: 'none' | 'language') {
+    groupByMode = mode;
+    try {
+      const next = {
+        watched_folders: appConfig?.watched_folders ?? [],
+        group_by_mode: mode === 'none' ? null : 'language'
+      };
+      appConfig = next;
+      await invoke("set_config", { config: next });
+    } catch (e) {
+      console.error("Failed to save group_by_mode:", e);
+    }
+  }
+
+  function toggleGroupCollapse(label: string) {
+    const next = new Set(collapsedGroups);
+    if (next.has(label)) {
+      next.delete(label);
+    } else {
+      next.add(label);
+    }
+    collapsedGroups = next;
+  }
+
+  function openTagPopover(repo: RepoMetadata, anchorEl: HTMLElement) {
+    tagPopoverRepo = repo;
+    const rect = anchorEl.getBoundingClientRect();
+    const popoverWidth = 288; // w-72
+    const gap = 10;
+    const viewportPadding = 12;
+
+    const left = Math.min(
+      Math.max(rect.right - popoverWidth, viewportPadding),
+      window.innerWidth - popoverWidth - viewportPadding
+    );
+    const top = Math.max(rect.top - gap, viewportPadding);
+
+    tagPopoverPosition = { top, left };
+    tagPopoverOpen = true;
+  }
+
+  function closeTagPopover() {
+    tagPopoverOpen = false;
+    tagPopoverRepo = null;
+    tagPopoverPosition = null;
+  }
+
+  function repoHasTag(repo: RepoMetadata, tag: StoreTag) {
+    return repo.tags?.includes(tag.name);
+  }
+
+  async function toggleTagForRepo(repo: RepoMetadata, tag: StoreTag) {
+    try {
+      if (repoHasTag(repo, tag)) {
+        await removeTag(repo.path, tag.id);
+      } else {
+        await assignTag(repo.path, tag.id);
+      }
+
+      // Sync tags for this repo from backend without requiring a full rescan
+      const updated = await invoke<StoreTag[]>("get_repo_tags", { repoPath: repo.path });
+      const tagNames = updated.map((t) => t.name);
+
+      repos = repos.map((r) =>
+        r.path === repo.path
+          ? { ...r, tags: tagNames }
+          : r
+      );
+
+      if (tagPopoverRepo?.path === repo.path) {
+        tagPopoverRepo = { ...repo, tags: tagNames };
+      }
+    } catch (e: any) {
+      const message = typeof e === "string" ? e : (e?.message || "Failed to update tag");
+      toast.error(message);
+    }
+  }
 </script>
+
+{#snippet RepoCard({ repo, status })}
+  <Card 
+    class="group glass glass-hover border-white/5 flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
+    onclick={(e) => {
+      if ((e.target as HTMLElement).closest('button')) return;
+      openPreview(repo);
+    }}
+  >
+    {#if viewMode === 'grid'}
+      <CardContent class="p-8 space-y-8 flex-1 flex flex-col">
+        <div class="flex items-start justify-between gap-6">
+          <div class="space-y-2 flex-1 min-w-0">
+            <h3 class="text-2xl font-black tracking-tight truncate group-hover:text-primary transition-colors">{repo.name}</h3>
+            <button 
+              onclick={() => openFolder(repo.path)}
+              class="text-[10px] bg-white/5 border border-white/5 hover:border-white/20 px-2 py-0.5 rounded-full font-mono text-muted-foreground truncate max-w-full block hover:text-foreground transition-all"
+              title={repo.path}
+            >
+              {repo.path}
+            </button>
+          </div>
+          <div class="p-3 bg-white/5 rounded-2xl text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-all duration-500">
+            <GitBranch class="w-5 h-5" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-white/5 rounded-2xl p-3 border border-white/5 hover:border-white/10 transition-all">
+            <div class="flex items-center space-x-2 mb-1">
+              <GitBranch class="w-3 h-3 text-muted-foreground" />
+              <span class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Branch</span>
+            </div>
+            <p class="text-xs font-bold truncate">{repo.branch}</p>
+          </div>
+          <div class="bg-white/5 rounded-2xl p-3 border border-white/5 hover:border-white/10 transition-all">
+            <div class="flex items-center space-x-2 mb-1">
+              <status.icon class="w-3 h-3 {status.color}" />
+              <span class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Status</span>
+            </div>
+            <p class="text-xs font-bold {status.color}">{status.label}</p>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-wrap gap-1.5 min-h-[24px]">
+          {#each Object.entries(repo.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 3) as [lang, count]}
+            {@const icon = getLanguageIcon(lang)}
+            <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground/80">
+              {#if icon}
+                <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1 inline-block align-[-2px]" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                  <path fill="currentColor" d={icon.path}></path>
+                </svg>
+              {/if}
+              {lang}
+            </Badge>
+          {/each}
+            {#if Object.keys(repo.languages || {}).length > 3}
+              <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black">
+                +{Object.keys(repo.languages).length - 3}
+              </Badge>
+            {/if}
+          </div>
+
+          <!-- Tag badges -->
+          <div class="flex flex-wrap gap-1.5 min-h-[20px]">
+            {#each repo.tags.slice(0, 3) as tagName}
+              {@const match = $allTags.find(t => t.name === tagName)}
+              <Badge
+                variant="outline"
+                class="bg-white/5 border-white/10 text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1"
+                style={`border-color: ${match?.color ?? '#6366f1'}33`}
+              >
+                <span
+                  class="w-2 h-2 rounded-full"
+                  style={`background: ${match?.color ?? '#6366f1'}`}
+                ></span>
+                {tagName}
+              </Badge>
+            {/each}
+            {#if repo.tags.length > 3}
+              <Badge variant="outline" class="bg-white/5 border-white/10 text-[8px] px-2 py-0.5 rounded-full font-black">
+                +{repo.tags.length - 3}
+              </Badge>
+            {/if}
+          </div>
+
+          {#if repo.description}
+            <p class="text-[13px] text-muted-foreground/90 line-clamp-3 min-h-[3rem] leading-relaxed font-medium">
+              {repo.description}
+            </p>
+          {/if}
+        </div>
+
+        <div class="flex flex-wrap gap-2 pt-2">
+          <Badge variant="outline" class="bg-white/5 border-white/5 text-[10px] px-3 py-1 rounded-full font-bold">
+            <Clock class="w-3 h-3 mr-1.5 text-primary" />
+            {formatRelativeTime(repo.last_modified)}
+          </Badge>
+          {#if repo.remote_url}
+            <Badge variant="outline" class="bg-white/5 border-white/5 text-[10px] px-3 py-1 rounded-full font-bold {repo.remote_reachable ? 'text-emerald-500' : 'text-amber-500 opacity-80'}">
+              <Globe class="w-3 h-3 mr-1.5" />
+              {repo.remote_reachable ? 'Connected' : 'Unreachable'}
+            </Badge>
+          {/if}
+        </div>
+
+        <div class="mt-auto pt-8 flex items-center justify-between border-t border-white/5 relative">
+          <div class="flex items-center bg-black/40 rounded-full p-1.5 border border-white/5 shadow-inner">
+            <Button 
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
+              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
+              onmouseleave={() => hoveredAction = null}
+              disabled={!!actionLoading[`${repo.path}-fetch`]}
+              onclick={() => runGitAction(repo, 'fetch')}
+            >
+              <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
+            </Button>
+            <Button 
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
+              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
+              onmouseleave={() => hoveredAction = null}
+              disabled={!!actionLoading[`${repo.path}-pull`]}
+              onclick={() => runGitAction(repo, 'pull')}
+            >
+              <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
+            </Button>
+            <Button 
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
+              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Push' }}
+              onmouseleave={() => hoveredAction = null}
+              disabled={!!actionLoading[`${repo.path}-push`]}
+              onclick={() => runGitAction(repo, 'push')}
+            >
+              <ArrowUp class="w-5 h-5 {actionLoading[`${repo.path}-push`] ? 'animate-pulse text-primary' : ''}" />
+            </Button>
+          </div>
+
+          {#if hoveredAction?.path === repo.path}
+            <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-bottom-1 duration-200 z-10">
+              {hoveredAction.label}
+            </div>
+          {/if}
+
+          <div class="flex items-center space-x-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="rounded-full hover:bg-white/5"
+              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Explore' }}
+              onmouseleave={() => hoveredAction = null}
+              onclick={() => openFolder(repo.path)}
+            >
+              <FolderOpen class="w-5 h-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="rounded-full hover:bg-primary/10 hover:text-primary"
+              onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
+            >
+              <Tag class="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    {:else}
+      <!-- List Item -->
+      <div class="flex-1 flex items-center justify-between py-2.5 px-6 overflow-hidden gap-8">
+        <div class="flex items-center space-x-5 min-w-0 flex-1">
+          <div class="p-2.5 bg-white/5 rounded-2xl text-muted-foreground/60 group-hover:text-primary transition-all duration-500 group-hover:bg-primary/10">
+            <GitBranch class="w-5 h-5" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center space-x-3 mb-0.5">
+              <h3 class="font-bold truncate text-sm tracking-tight">{repo.name}</h3>
+              <div class="flex gap-1">
+                {#each Object.keys(repo.languages || {}).slice(0, 2) as lang}
+                  {@const icon = getLanguageIcon(lang)}
+                  <span class="inline-flex items-center text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/5 text-muted-foreground font-black uppercase tracking-widest rounded-md">
+                    {#if icon}
+                      <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                        <path fill="currentColor" d={icon.path}></path>
+                      </svg>
+                    {/if}
+                    {lang}
+                  </span>
+                {/each}
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button 
+                onclick={() => openFolder(repo.path)}
+                class="text-[10px] text-muted-foreground/60 font-mono truncate hover:text-primary transition-colors block text-left"
+              >
+                {repo.path}
+              </button>
+              {#if repo.description}
+                 <span class="text-[10px] text-muted-foreground/40 font-medium truncate italic">• {repo.description}</span>
+              {/if}
+            </div>
+            <!-- Inline tag badges -->
+            {#if repo.tags.length}
+              <div class="flex flex-wrap gap-1 mt-1">
+                {#each repo.tags.slice(0, 3) as tagName}
+                  {@const match = $allTags.find(t => t.name === tagName)}
+                  <span
+                    class="inline-flex items-center gap-1 text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10"
+                    style={`border-color: ${match?.color ?? '#6366f1'}33`}
+                  >
+                    <span
+                      class="w-1.5 h-1.5 rounded-full"
+                      style={`background: ${match?.color ?? '#6366f1'}`}
+                    ></span>
+                    {tagName}
+                  </span>
+                {/each}
+                {#if repo.tags.length > 3}
+                  <span class="text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 font-bold">
+                    +{repo.tags.length - 3}
+                  </span>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-16 flex-shrink-0">
+          <div class="flex flex-col items-center">
+            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Branch</span>
+            <span class="text-sm font-bold tracking-tight">{repo.branch}</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Status</span>
+            <div class="flex items-center space-x-2">
+              <status.icon class="w-4 h-4 {status.color}" />
+              <span class="text-sm font-bold tracking-tight {status.color}">{status.label}</span>
+            </div>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Activity</span>
+            <span class="text-sm font-bold text-muted-foreground/80 tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2 flex-shrink-0 relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary transition-all"
+            onmouseenter={() => hoveredAction = { path: repo.path, label: 'Inspect' }}
+            onmouseleave={() => hoveredAction = null}
+            onclick={() => openPreview(repo)}
+          >
+            <Eye class="w-5 h-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary transition-all"
+            onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
+          >
+            <Tag class="w-4 h-4" />
+          </Button>
+          <div class="h-8 w-px bg-white/5 mx-1"></div>
+          <Button 
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-emerald-500" 
+             onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
+             onmouseleave={() => hoveredAction = null}
+             disabled={!!actionLoading[`${repo.path}-fetch`]}
+             onclick={() => runGitAction(repo, 'fetch')}
+          >
+            <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
+          </Button>
+          <Button 
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary" 
+             onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
+             onmouseleave={() => hoveredAction = null}
+             disabled={!!actionLoading[`${repo.path}-pull`]}
+             onclick={() => runGitAction(repo, 'pull')}
+          >
+            <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
+          </Button>
+          <Button 
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-blue-500" 
+             onmouseenter={() => hoveredAction = { path: repo.path, label: 'Finder' }}
+             onmouseleave={() => hoveredAction = null}
+             onclick={() => openFolder(repo.path)}
+          >
+            <FolderOpen class="w-5 h-5" />
+          </Button>
+
+          {#if hoveredAction?.path === repo.path}
+            <div class="absolute -top-12 right-0 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-right-1 duration-200 z-10 whitespace-nowrap">
+              {hoveredAction.label}
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  </Card>
+{/snippet}
 
 <div class="p-8 space-y-8 animate-in fade-in duration-500 max-w-7xl mx-auto">
   <!-- Header / Filters -->
@@ -278,11 +833,17 @@
           </button>
           
           {#each visibleLanguages as lang}
+            {@const icon = getLanguageIcon(lang.name)}
             <button 
               onclick={() => toggleLanguage(lang.name)}
               class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border whitespace-nowrap {selectedLanguages.includes(lang.name) ? 'bg-white/10 text-primary border-primary/40 shadow-glow' : 'hover:bg-white/5 text-muted-foreground border-transparent'}"
             >
               <div class="flex items-center gap-2">
+                {#if icon}
+                  <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
+                    <path fill="currentColor" d={icon.path}></path>
+                  </svg>
+                {/if}
                 {lang.name}
                 <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
                 {#if selectedLanguages.includes(lang.name)}
@@ -311,11 +872,17 @@
                   </div>
                   <div class="max-h-64 overflow-y-auto space-y-1 custom-scrollbar pr-1">
                     {#each hiddenLanguages as lang}
+                      {@const icon = getLanguageIcon(lang.name)}
                       <button 
                         onclick={(e) => { e.stopPropagation(); toggleLanguage(lang.name); showLanguageDropdown = false; }}
                         class="w-full text-left px-3 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all flex items-center justify-between group {selectedLanguages.includes(lang.name) ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}"
                       >
                         <div class="flex items-center gap-2 truncate">
+                          {#if icon}
+                            <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
+                              <path fill="currentColor" d={icon.path}></path>
+                            </svg>
+                          {/if}
                           <span>{lang.name}</span>
                           <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
                         </div>
@@ -335,7 +902,7 @@
       </div>
     </div>
 
-    <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-3">
       <div class="bg-white/5 rounded-xl border border-white/10 p-1 flex items-center">
         <button 
           onclick={() => viewMode = 'grid'}
@@ -351,6 +918,22 @@
         </button>
       </div>
       
+      <div class="bg-white/5 rounded-xl border border-white/10 p-1 flex items-center gap-1">
+        <span class="px-2 text-[9px] uppercase tracking-[0.25em] text-muted-foreground/70">Group By</span>
+        <button 
+          onclick={() => setGroupByMode('none')}
+          class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all {groupByMode === 'none' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-white/5'}"
+        >
+          None
+        </button>
+        <button 
+          onclick={() => setGroupByMode('language')}
+          class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all {groupByMode === 'language' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-white/5'}"
+        >
+          Language
+        </button>
+      </div>
+
       <Button variant="outline" size="icon" class="rounded-xl border-white/10" onclick={refreshRepos} disabled={isScanning}>
         <RefreshCw class="w-4 h-4 {isScanning ? 'animate-spin text-primary' : ''}" />
       </Button>
@@ -380,223 +963,88 @@
       <Button variant="outline" class="rounded-full px-8" onclick={() => { searchQuery = ""; selectedLanguages = []; }}>Reset Filters</Button>
     </div>
   {:else}
-    <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "space-y-3"}>
-      {#each filteredRepos as repo (repo.path)}
-        {@const status = getSyncStatusDetails(repo.sync_status)}
-        <Card 
-          class="group glass glass-hover border-white/5 flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
-          onclick={(e) => {
-            if (e.target.closest('button')) return;
-            openPreview(repo);
-          }}
-        >
-          {#if viewMode === 'grid'}
-            <!-- Grid Item -->
-            <CardContent class="p-8 space-y-8 flex-1 flex flex-col">
-              <div class="flex items-start justify-between gap-6">
-                <div class="space-y-2 flex-1 min-w-0">
-                  <h3 class="text-2xl font-black tracking-tight truncate group-hover:text-primary transition-colors">{repo.name}</h3>
-                  <button 
-                    onclick={() => openFolder(repo.path)}
-                    class="text-[10px] bg-white/5 border border-white/5 hover:border-white/20 px-2 py-0.5 rounded-full font-mono text-muted-foreground truncate max-w-full block hover:text-foreground transition-all transition-all"
-                    title={repo.path}
-                  >
-                    {repo.path}
-                  </button>
-                </div>
-                <div class="p-3 bg-white/5 rounded-2xl text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-all duration-500">
-                  <GitBranch class="w-5 h-5" />
-                </div>
+    {#if groupByMode === 'language'}
+      <div class="space-y-6">
+        {#each Object.entries(groupedRepos) as [label, group]}
+          <GroupHeader
+            label={label}
+            count={group.length}
+            collapsed={collapsedGroups.has(label)}
+            onToggle={() => toggleGroupCollapse(label)}
+          >
+            {#snippet children()}
+              <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2" : "space-y-2 mt-2"}>
+                {#each group as repo (repo.path)}
+                  {@const status = getSyncStatusDetails(repo.sync_status)}
+                  {@render RepoCard({ repo, status })}
+                {/each}
               </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <div class="bg-white/5 rounded-2xl p-3 border border-white/5 hover:border-white/10 transition-all">
-                  <div class="flex items-center space-x-2 mb-1">
-                    <GitBranch class="w-3 h-3 text-muted-foreground" />
-                    <span class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Branch</span>
-                  </div>
-                  <p class="text-xs font-bold truncate">{repo.branch}</p>
-                </div>
-                <div class="bg-white/5 rounded-2xl p-3 border border-white/5 hover:border-white/10 transition-all">
-                  <div class="flex items-center space-x-2 mb-1">
-                    <status.icon class="w-3 h-3 {status.color}" />
-                    <span class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Status</span>
-                  </div>
-                  <p class="text-xs font-bold {status.color}">{status.label}</p>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-3">
-                <div class="flex flex-wrap gap-1.5 min-h-[24px]">
-                  {#each Object.entries(repo.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 3) as [lang, count]}
-                    <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground/80">
-                      {lang}
-                    </Badge>
-                  {/each}
-                  {#if Object.keys(repo.languages || {}).length > 3}
-                    <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black">
-                      +{Object.keys(repo.languages).length - 3}
-                    </Badge>
-                  {/if}
-                </div>
-
-                {#if repo.description}
-                  <p class="text-[13px] text-muted-foreground/90 line-clamp-3 min-h-[3rem] leading-relaxed font-medium">
-                    {repo.description}
-                  </p>
-                {/if}
-              </div>
-
-              <div class="flex flex-wrap gap-2 pt-2">
-                <Badge variant="outline" class="bg-white/5 border-white/5 text-[10px] px-3 py-1 rounded-full font-bold">
-                  <Clock class="w-3 h-3 mr-1.5 text-primary" />
-                  {formatRelativeTime(repo.last_modified)}
-                </Badge>
-                {#if repo.remote_url}
-                  <Badge variant="outline" class="bg-white/5 border-white/5 text-[10px] px-3 py-1 rounded-full font-bold {repo.remote_reachable ? 'text-emerald-500' : 'text-amber-500 opacity-80'}">
-                    <Globe class="w-3 h-3 mr-1.5" />
-                    {repo.remote_reachable ? 'Connected' : 'Unreachable'}
-                  </Badge>
-                {/if}
-              </div>
-
-              <div class="mt-auto pt-8 flex items-center justify-between border-t border-white/5 relative">
-                <div class="flex items-center bg-black/40 rounded-full p-1.5 border border-white/5 shadow-inner">
-                  <Button 
-                    variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
-                    onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
-                    onmouseleave={() => hoveredAction = null}
-                    disabled={!!actionLoading[`${repo.path}-fetch`]}
-                    onclick={() => runGitAction(repo, 'fetch')}
-                  >
-                    <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
-                  </Button>
-                  <Button 
-                    variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
-                    onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
-                    onmouseleave={() => hoveredAction = null}
-                    disabled={!!actionLoading[`${repo.path}-pull`]}
-                    onclick={() => runGitAction(repo, 'pull')}
-                  >
-                    <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
-                  </Button>
-                  <Button 
-                    variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
-                    onmouseenter={() => hoveredAction = { path: repo.path, label: 'Push' }}
-                    onmouseleave={() => hoveredAction = null}
-                    disabled={!!actionLoading[`${repo.path}-push`]}
-                    onclick={() => runGitAction(repo, 'push')}
-                  >
-                    <ArrowUp class="w-5 h-5 {actionLoading[`${repo.path}-push`] ? 'animate-pulse text-primary' : ''}" />
-                  </Button>
-                </div>
-
-                {#if hoveredAction?.path === repo.path}
-                  <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-bottom-1 duration-200 z-10">
-                    {hoveredAction.label}
-                  </div>
-                {/if}
-
-                <div class="flex items-center space-x-1">
-                  <Button variant="ghost" size="icon" class="rounded-full hover:bg-white/5" onmouseenter={() => hoveredAction = { path: repo.path, label: 'Explore' }} onmouseleave={() => hoveredAction = null} onclick={() => openFolder(repo.path)}>
-                    <FolderOpen class="w-5 h-5" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          {:else}
-            <!-- List Item -->
-            <div class="flex-1 flex items-center justify-between py-2.5 px-6 overflow-hidden gap-8">
-              <div class="flex items-center space-x-5 min-w-0 flex-1">
-                <div class="p-2.5 bg-white/5 rounded-2xl text-muted-foreground/60 group-hover:text-primary transition-all duration-500 group-hover:bg-primary/10">
-                  <GitBranch class="w-5 h-5" />
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center space-x-3 mb-0.5">
-                    <h3 class="font-bold truncate text-sm tracking-tight">{repo.name}</h3>
-                    <div class="flex gap-1">
-                      {#each Object.keys(repo.languages || {}).slice(0, 2) as lang}
-                        <span class="text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/5 text-muted-foreground font-black uppercase tracking-widest rounded-md">{lang}</span>
-                      {/each}
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button 
-                      onclick={() => openFolder(repo.path)}
-                      class="text-[10px] text-muted-foreground/60 font-mono truncate hover:text-primary transition-colors block text-left"
-                    >
-                      {repo.path}
-                    </button>
-                    {#if repo.description}
-                       <span class="text-[10px] text-muted-foreground/40 font-medium truncate italic">• {repo.description}</span>
-                    {/if}
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex items-center space-x-16 flex-shrink-0">
-                <div class="flex flex-col items-center">
-                  <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Branch</span>
-                  <span class="text-sm font-bold tracking-tight">{repo.branch}</span>
-                </div>
-                <div class="flex flex-col items-center">
-                  <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Status</span>
-                  <div class="flex items-center space-x-2">
-                    <status.icon class="w-4 h-4 {status.color}" />
-                    <span class="text-sm font-bold tracking-tight {status.color}">{status.label}</span>
-                  </div>
-                </div>
-                <div class="flex flex-col items-center">
-                  <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Activity</span>
-                  <span class="text-sm font-bold text-muted-foreground/80 tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
-                </div>
-              </div>
-
-              <div class="flex items-center space-x-2 flex-shrink-0 relative">
-                <Button variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary transition-all" onmouseenter={() => hoveredAction = { path: repo.path, label: 'Inspect' }} onmouseleave={() => hoveredAction = null} onclick={() => openPreview(repo)}>
-                  <Eye class="w-5 h-5" />
-                </Button>
-                <div class="h-8 w-px bg-white/5 mx-1"></div>
-                <Button 
-                   variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-emerald-500" 
-                   onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
-                   onmouseleave={() => hoveredAction = null}
-                   disabled={!!actionLoading[`${repo.path}-fetch`]}
-                   onclick={() => runGitAction(repo, 'fetch')}
-                >
-                  <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
-                </Button>
-                <Button 
-                   variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary" 
-                   onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
-                   onmouseleave={() => hoveredAction = null}
-                   disabled={!!actionLoading[`${repo.path}-pull`]}
-                   onclick={() => runGitAction(repo, 'pull')}
-                >
-                  <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
-                </Button>
-                <Button 
-                   variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-blue-500" 
-                   onmouseenter={() => hoveredAction = { path: repo.path, label: 'Finder' }}
-                   onmouseleave={() => hoveredAction = null}
-                   onclick={() => openFolder(repo.path)}
-                >
-                  <FolderOpen class="w-5 h-5" />
-                </Button>
-
-                {#if hoveredAction?.path === repo.path}
-                  <div class="absolute -top-12 right-0 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-right-1 duration-200 z-10 whitespace-nowrap">
-                    {hoveredAction.label}
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/if}
-        </Card>
-      {/each}
-    </div>
+            {/snippet}
+          </GroupHeader>
+        {/each}
+      </div>
+    {:else}
+      <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "space-y-3"}>
+        {#each filteredRepos as repo (repo.path)}
+          {@const status = getSyncStatusDetails(repo.sync_status)}
+          {@render RepoCard({ repo, status })}
+        {/each}
+      </div>
+    {/if}
   {/if}
 </div>
+
+{#if tagPopoverOpen && tagPopoverRepo && tagPopoverPosition}
+  <button 
+    type="button"
+    class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[80]"
+    onclick={closeTagPopover}
+    aria-label="Close tag selector"
+  ></button>
+  <div
+    class="fixed w-72 bg-background/95 border border-white/10 rounded-2xl shadow-2xl z-[81] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-200"
+    style={`top: ${tagPopoverPosition.top}px; left: ${tagPopoverPosition.left}px; transform: translateY(-100%);`}
+    use:clickOutside={closeTagPopover}
+  >
+    <div class="flex items-center justify-between mb-1">
+      <div class="space-y-0.5">
+        <p class="text-[10px] uppercase tracking-[0.25em] text-muted-foreground/70 font-black">Tags</p>
+        <p class="text-xs font-semibold truncate">{tagPopoverRepo.name}</p>
+      </div>
+      <button
+        class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-muted-foreground"
+        onclick={closeTagPopover}
+      >
+        <X class="w-3 h-3" />
+      </button>
+    </div>
+
+    {#if !$allTags.length}
+      <p class="text-[11px] text-muted-foreground">No tags yet. Create one from the sidebar first.</p>
+    {:else}
+      <div class="max-h-64 overflow-y-auto space-y-1 pr-1">
+        {#each $allTags as tag}
+          {@const checked = repoHasTag(tagPopoverRepo, tag)}
+          <button
+            class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] hover:bg-white/5 border border-transparent"
+            onclick={() => toggleTagForRepo(tagPopoverRepo, tag)}
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span
+                class="w-2 h-2 rounded-full border border-white/20"
+                style={`background: ${tag.color}`}
+              ></span>
+              <span class="truncate">{tag.name}</span>
+            </div>
+            <span class="text-[10px] text-muted-foreground">
+              {#if checked}✔{:else}+{/if}
+            </span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+{/if}
 
 <!-- Side Panel (README Preview) -->
 {#if selectedRepoForPreview}
@@ -702,8 +1150,15 @@
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Manifested Artifacts</h3>
                <div class="flex flex-wrap gap-2.5">
                  {#each Object.entries(selectedRepoForPreview.languages).sort((a, b) => b[1] - a[1]) as [lang, count]}
+                   {@const icon = getLanguageIcon(lang)}
                    <div class="bg-white/[0.03] px-5 py-3 rounded-2xl border border-white/5 flex items-center gap-4 hover:border-primary/20 transition-colors">
-                     <div class="w-2 h-2 rounded-full bg-primary/40"></div>
+                     {#if icon}
+                       <svg viewBox="0 0 24 24" class="w-4 h-4 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                         <path fill="currentColor" d={icon.path}></path>
+                       </svg>
+                     {:else}
+                       <div class="w-2 h-2 rounded-full bg-primary/40"></div>
+                     {/if}
                      <span class="text-xs font-bold uppercase tracking-wider">{lang}</span>
                      <span class="text-[9px] font-black p-1 bg-white/5 rounded border border-white/5 text-muted-foreground">{count}</span>
                    </div>
@@ -740,4 +1195,3 @@
     </div>
   </div>
 {/if}
-
