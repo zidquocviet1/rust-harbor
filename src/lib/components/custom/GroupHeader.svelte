@@ -17,7 +17,7 @@
   } = $props();
 </script>
 
-<section class="relative space-y-3 rounded-[1.75rem] border border-slate-200/75 bg-slate-50/70 px-3 pb-3 pt-6">
+<section class="relative space-y-3">
   <header
     class="absolute -top-3 left-3 right-3 z-20 flex items-center justify-between cursor-pointer"
     onclick={onToggle}
@@ -49,9 +49,11 @@
     </div>
   </header>
 
-  {#if !collapsed}
-    <div class="overflow-hidden pt-2" transition:slide={{ duration: 220 }}>
-      {@render children()}
-    </div>
-  {/if}
+  <div class="rounded-[1.75rem] border border-slate-200/75 bg-slate-50/70 px-3 pb-4 pt-6">
+    {#if !collapsed}
+      <div class="pt-2" transition:slide={{ duration: 220 }}>
+        {@render children()}
+      </div>
+    {/if}
+  </div>
 </section>

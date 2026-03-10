@@ -596,7 +596,7 @@
   }
 )}
   <Card 
-    class="group glass glass-hover border-slate-200/70 flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
+    class="group glass glass-hover border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
     onclick={(e) => {
       if ((e.target as HTMLElement).closest('button')) return;
       openPreview(repo);
