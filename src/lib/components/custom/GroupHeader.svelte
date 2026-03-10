@@ -17,32 +17,22 @@
   } = $props();
 </script>
 
-<section class="space-y-3">
+<section class="relative space-y-3 rounded-[1.75rem] border border-slate-200/75 bg-slate-50/70 px-3 pb-3 pt-6">
   <header
-    class="sticky top-0 z-20 -mx-2 px-4 py-2 rounded-2xl bg-background/80 backdrop-blur border border-white/10 flex items-center justify-between cursor-pointer group"
+    class="absolute -top-3 left-3 right-3 z-20 flex items-center justify-between cursor-pointer"
     onclick={onToggle}
     role="button"
     tabindex="0"
     onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onToggle()}
   >
-    <div class="flex items-center gap-3">
-      <div class="w-6 h-6 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shadow-sm shadow-primary/30">
-        <span class="text-[11px] font-black uppercase tracking-[0.14em]">
-          {label.slice(0, 2)}
-        </span>
-      </div>
-      <div>
-        <p class="text-xs font-bold tracking-tight">{label}</p>
-        <p class="text-[9px] text-muted-foreground uppercase tracking-[0.3em]">
-          {count} repos
-        </p>
+    <div class="flex-1 flex items-center justify-start">
+      <div class="inline-flex items-center gap-2 rounded-full bg-slate-50/90 px-4 py-1.5 border border-slate-200/80 shadow-[0_6px_16px_rgba(15,23,42,0.08)]">
+        <span class="text-[11px] font-black uppercase tracking-[0.2em]">{label}</span>
+        <span class="text-[9px] uppercase tracking-[0.3em] text-muted-foreground">{count} repos</span>
       </div>
     </div>
-    <div class="flex items-center gap-2">
-      <div class="h-6 px-2 rounded-full bg-white/5 border border-white/10 text-[9px] uppercase tracking-[0.3em] text-muted-foreground flex items-center gap-1">
-        <span>{collapsed ? "Expand" : "Collapse"}</span>
-      </div>
-      <div class="w-7 h-7 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-all">
+    <div class="w-10 flex items-center justify-end">
+      <div class="w-7 h-7 rounded-full bg-white/90 border border-slate-200/80 flex items-center justify-center text-muted-foreground transition-all">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           class="w-3.5 h-3.5 transform transition-transform duration-300 {collapsed ? '-rotate-90' : 'rotate-0'}"
