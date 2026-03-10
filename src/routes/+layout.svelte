@@ -6,7 +6,6 @@
   import { toast } from "svelte-sonner";
   import GitMissingError from '$lib/components/custom/GitMissingError.svelte';
   import { Toaster } from "$lib/components/ui/sonner";
-  import { ModeWatcher } from "mode-watcher";
   import { page } from '$app/state';
   import { 
     allTags, 
@@ -125,15 +124,14 @@
   <title>Rust Harbor — Local Git Command Center</title>
 </svelte:head>
 
-<ModeWatcher />
-<Toaster position="bottom-right" richColors theme="dark" />
+<Toaster position="bottom-right" richColors theme="light" />
 
-<div class="fixed inset-0 bg-background bg-grid-white -z-20"></div>
-<div class="fixed inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-transparent -z-10 pointer-events-none"></div>
+<div class="fixed inset-0 bg-background -z-20"></div>
+<div class="fixed inset-0 bg-gradient-to-tr from-primary/10 via-transparent to-sky-100/40 -z-10 pointer-events-none"></div>
 
 <!-- Decorative ambient glows -->
-<div class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[120px] -z-10 animate-pulse transition-all duration-1000"></div>
-<div class="fixed bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-indigo-500/10 rounded-full blur-[100px] -z-10 animate-pulse delay-700"></div>
+<div class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/12 rounded-full blur-[120px] -z-10 animate-pulse transition-all duration-1000"></div>
+<div class="fixed bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-cyan-400/10 rounded-full blur-[100px] -z-10 animate-pulse delay-700"></div>
 
 <main class="relative z-0">
   {#if checking}
@@ -157,8 +155,8 @@
   {:else}
     <div class="flex min-h-screen">
       <!-- Sidebar -->
-      <aside class="w-64 border-r border-white/5 glass flex flex-col sticky top-0 h-screen z-50">
-        <div class="p-6 border-b border-white/5 flex items-center space-x-3">
+      <aside class="w-64 border-r border-slate-200/70 glass flex flex-col sticky top-0 h-screen z-50">
+        <div class="p-6 border-b border-slate-200/70 flex items-center space-x-3">
           <div class="p-2 bg-primary rounded-lg text-primary-foreground shadow-lg shadow-primary/20">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-anchor"><circle cx="12" cy="5" r="3"/><path d="M12 22V8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg>
           </div>
@@ -171,14 +169,14 @@
         <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
           <a 
             href="/" 
-            class="flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 group {page.url.pathname === '/' ? 'bg-primary/20 text-primary' : 'hover:bg-white/5 text-muted-foreground'}"
+            class="flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 group {page.url.pathname === '/' ? 'bg-primary/14 text-primary border border-primary/25' : 'hover:bg-slate-100/80 text-muted-foreground'}"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layout-list group-hover:text-primary transition-colors"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
             <span class="font-medium">Repository List</span>
           </a>
           <a 
             href="/settings" 
-            class="flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 group {page.url.pathname === '/settings' ? 'bg-primary/20 text-primary' : 'hover:bg-white/5 text-muted-foreground'}"
+            class="flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 group {page.url.pathname === '/settings' ? 'bg-primary/14 text-primary border border-primary/25' : 'hover:bg-slate-100/80 text-muted-foreground'}"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-folder-cog group-hover:text-primary transition-colors"><path d="M10.5 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v3.3"/><circle cx="18" cy="18" r="3"/><path d="M18 14v1"/><path d="M18 21v1"/><path d="M22 18h-1"/><path d="M15 18h-1"/><path d="M21 15l-.7.7"/><path d="M15.7 20.3l-.7.7"/><path d="M21 21l-.7-.7"/><path d="M15.7 15.7l-.7-.7"/></svg>
             <span class="font-medium">Watched Folders</span>
@@ -189,7 +187,7 @@
             <div 
               role="button"
               tabindex="0"
-              class="flex items-center justify-between px-4 py-2 rounded-xl bg-white/5 border border-white/10 cursor-pointer group text-left"
+              class="flex items-center justify-between px-4 py-2 rounded-xl bg-white/70 border border-slate-200/80 cursor-pointer group text-left shadow-sm"
               onclick={() => tagsCollapsed = !tagsCollapsed}
               onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tagsCollapsed = !tagsCollapsed)}
             >
@@ -198,7 +196,7 @@
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v2.5"/><path d="M3 7v12a2 2 0 0 0 2 2h9"/><path d="M18 15v6"/><path d="M15 18h6"/></svg>
                 </div>
                 <div class="flex flex-col">
-                  <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">
+                  <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
                     Tags
                   </span>
                   <span class="text-xs font-medium text-muted-foreground">
@@ -218,7 +216,7 @@
                 <button 
                   type="button"
                   aria-label={tagsCollapsed ? "Expand tag section" : "Collapse tag section"}
-                  class="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                  class="p-1.5 rounded-lg hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 transform transition-transform duration-300 {tagsCollapsed ? '-rotate-90' : 'rotate-0'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
@@ -229,7 +227,7 @@
               <div class="mt-3 space-y-2">
                 <!-- Empty state -->
                 {#if !$allTags.length && !creatingTag}
-                  <div class="px-4 py-3 rounded-xl border border-dashed border-white/10 bg-white/5 text-xs text-muted-foreground flex items-center justify-between">
+                  <div class="px-4 py-3 rounded-xl border border-dashed border-slate-300/80 bg-white/70 text-xs text-muted-foreground flex items-center justify-between">
                     <div class="flex items-center gap-2">
                       <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
@@ -249,7 +247,7 @@
                 {#if creatingTag}
                   <div class="px-4 py-3 rounded-xl border border-primary/40 bg-primary/5 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
                     <input
-                      class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/60"
+                      class="w-full bg-white border border-slate-300/80 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
                       placeholder="Tag name..."
                       bind:value={newTagName}
                       onkeydown={(e) => e.key === 'Enter' && confirmCreateTag()}
@@ -259,7 +257,7 @@
                         <button
                           type="button"
                           aria-label={`Select color ${color}`}
-                          class="w-5 h-5 rounded-full border {newTagColor === color ? 'border-white shadow-glow' : 'border-white/20'}"
+                          class="w-5 h-5 rounded-full border {newTagColor === color ? 'border-slate-700 shadow-md' : 'border-slate-200'}"
                           style={`background-color: ${color}`}
                           onclick={() => newTagColor = color}
                         ></button>
@@ -284,7 +282,7 @@
 
                 <!-- "All" + list -->
                 {#if $allTags.length}
-                  <div class="flex items-center justify-between px-4 text-[10px] text-muted-foreground/70 mb-1">
+                  <div class="flex items-center justify-between px-4 text-[10px] text-muted-foreground mb-1">
                     <button
                       class="uppercase tracking-[0.2em] font-bold hover:text-foreground { $selectedTagIds.size === 0 ? 'text-primary' : '' }"
                       onclick={clearTagFilters}
@@ -300,7 +298,7 @@
                     {#each $allTags as tag (tag.id)}
                       {@const isSelected = $selectedTagIds.has(tag.id)}
                       <button
-                        class="w-full flex items-center justify-between px-4 py-2 rounded-lg text-xs transition-all border {isSelected ? 'bg-primary/20 border-primary/50 ring-1 ring-primary/40 text-primary shadow-glow' : 'bg-white/3 border-transparent hover:bg-white/8 text-muted-foreground'}"
+                        class="w-full flex items-center justify-between px-4 py-2 rounded-lg text-xs transition-all border {isSelected ? 'bg-primary/16 border-primary/40 ring-2 ring-primary/20 text-primary shadow-sm' : 'bg-white/70 border-slate-200/70 hover:bg-slate-100 text-muted-foreground'}"
                         onclick={() => toggleTagFilter(tag.id)}
                         oncontextmenu={(e) => handleTagContextMenu(e as MouseEvent, tag)}
                         in:fly={{ y: -8, duration: 180 }}
@@ -308,12 +306,12 @@
                       >
                         <div class="flex items-center gap-2 min-w-0">
                           <span
-                            class="w-2 h-2 rounded-full border border-white/20 shrink-0"
+                            class="w-2 h-2 rounded-full border border-slate-300 shrink-0"
                             style={`background: ${tag.color}`}
                           ></span>
                           {#if renamingTagId === tag.id}
                             <input
-                              class="bg-black/30 border border-white/10 rounded px-2 py-0.5 text-[11px] w-full"
+                              class="bg-white border border-slate-300 rounded px-2 py-0.5 text-[11px] w-full"
                               bind:value={renameValue}
                               onclick={(e) => e.stopPropagation()}
                               onkeydown={(e) => {
@@ -325,7 +323,7 @@
                             <span class="truncate">{tag.name}</span>
                           {/if}
                         </div>
-                        <span class="text-[9px] px-2 py-0.5 rounded-full bg-black/30 border border-white/10">
+                        <span class="text-[9px] px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
                           {tag.repo_count}
                         </span>
                       </button>
@@ -337,8 +335,8 @@
           </div>
         </nav>
 
-        <div class="p-4 border-t border-white/5 space-y-2">
-          <div class="px-4 py-3 bg-white/5 rounded-2xl border border-white/5">
+        <div class="p-4 border-t border-slate-200/70 space-y-2">
+          <div class="px-4 py-3 bg-white/70 rounded-2xl border border-slate-200/80">
             <p class="text-[10px] uppercase tracking-widest text-muted-foreground font-bold mb-1">Status</p>
             <div class="flex items-center space-x-2">
               <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -357,18 +355,20 @@
 </main>
 
 {#if contextMenuTag && contextMenuPosition}
-  <div 
+  <button 
+    type="button"
+    aria-label="Close tag context menu"
     class="fixed inset-0 z-[90]"
     onclick={closeContextMenu}
-  ></div>
+  ></button>
   <div
-    class="fixed z-[91] w-40 bg-background/95 border border-white/10 rounded-xl shadow-xl py-1 text-xs"
+    class="fixed z-[91] w-40 bg-white/95 border border-slate-200 rounded-xl shadow-xl py-1 text-xs"
     style={`top: ${contextMenuPosition.y}px; left: ${contextMenuPosition.x}px;`}
   >
     <button
       type="button"
-      class="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
-      onclick={() => { openRename(contextMenuTag); closeContextMenu(); }}
+      class="w-full px-3 py-1.5 text-left hover:bg-slate-100 flex items-center justify-between"
+      onclick={() => { if (contextMenuTag) openRename(contextMenuTag); closeContextMenu(); }}
     >
       <span>Rename</span>
     </button>
@@ -389,8 +389,8 @@
 {/if}
 
 {#if showDeleteDialog && pendingDeleteTag}
-  <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[95] flex items-center justify-center">
-    <div class="bg-background/95 border border-white/10 rounded-2xl shadow-2xl p-5 w-[320px] space-y-4">
+  <div class="fixed inset-0 bg-slate-900/25 backdrop-blur-sm z-[95] flex items-center justify-center">
+    <div class="bg-white/95 border border-slate-200 rounded-2xl shadow-2xl p-5 w-[320px] space-y-4">
       <div class="space-y-1">
         <p class="text-sm font-semibold">Delete tag</p>
         <p class="text-xs text-muted-foreground">
@@ -401,7 +401,7 @@
       <div class="flex justify-end gap-2">
         <button
           type="button"
-          class="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.2em] text-muted-foreground hover:bg-white/5"
+          class="px-3 py-1.5 rounded-lg text-xs uppercase tracking-[0.2em] text-muted-foreground hover:bg-slate-100"
           onclick={() => { showDeleteDialog = false; pendingDeleteTag = null; }}
         >
           Cancel

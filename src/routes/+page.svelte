@@ -162,6 +162,8 @@
   let actionLoading = $state<Record<string, string | null>>({});
   let hoveredAction = $state<{ path: string, label: string } | null>(null);
   let showLanguageDropdown = $state(false);
+  let languageDropdownPosition = $state<{ top: number; left: number } | null>(null);
+  let languageDropdownAnchor: HTMLButtonElement | null = null;
   let selectedRepoForPreview = $state<RepoMetadata | null>(null);
   let readmeContent = $state<{ html: string, raw: string }>({ html: "", raw: "" });
   let readmeLoading = $state(false);
@@ -235,8 +237,91 @@
       .map(([lang, count]) => ({ name: lang, count }));
   });
 
-  const visibleLanguages = $derived(langStats.slice(0, 7));
-  const hiddenLanguages = $derived(langStats.slice(7));
+  let languageFilterEl: HTMLDivElement | null = null;
+  let languageMeasureEl: HTMLDivElement | null = null;
+  let languageVisibleCount = $state(7);
+  let languageResizeObserver: ResizeObserver | null = null;
+
+  function recalcLanguageVisibleCount() {
+    if (!languageFilterEl || !languageMeasureEl) return;
+    const containerWidth = languageFilterEl.clientWidth;
+    if (containerWidth <= 0) return;
+
+    const style = getComputedStyle(languageFilterEl);
+    const gap = parseFloat(style.columnGap || style.gap || "0");
+    const allChip = languageMeasureEl.querySelector("[data-all-chip]") as HTMLElement | null;
+    const langChips = Array.from(languageMeasureEl.querySelectorAll("[data-lang-chip]")) as HTMLElement[];
+    const moreChip = languageMeasureEl.querySelector("[data-more-chip]") as HTMLElement | null;
+
+    if (!allChip) return;
+
+    const allWidth = allChip.getBoundingClientRect().width;
+    const moreWidth = moreChip ? moreChip.getBoundingClientRect().width : 0;
+    let used = allWidth;
+    let count = 0;
+
+    for (let i = 0; i < langChips.length; i += 1) {
+      const chipWidth = langChips[i].getBoundingClientRect().width;
+      const remaining = langChips.length - (count + 1);
+      const needsMore = remaining > 0;
+      const extra = needsMore ? gap + moreWidth : 0;
+      const nextUsed = used + gap + chipWidth + extra;
+      if (nextUsed <= containerWidth) {
+        count += 1;
+        used += gap + chipWidth;
+      } else {
+        break;
+      }
+    }
+
+    languageVisibleCount = Math.max(0, Math.min(count, langStats.length));
+  }
+
+  function scheduleLanguageRecalc() {
+    if (typeof window === "undefined") return;
+    tick().then(() => requestAnimationFrame(recalcLanguageVisibleCount));
+  }
+
+  function toggleLanguageDropdown() {
+    if (showLanguageDropdown) {
+      showLanguageDropdown = false;
+      languageDropdownPosition = null;
+      return;
+    }
+    if (!languageDropdownAnchor) {
+      showLanguageDropdown = true;
+      return;
+    }
+    const rect = languageDropdownAnchor.getBoundingClientRect();
+    const width = 224;
+    const left = Math.min(rect.left, window.innerWidth - width - 16);
+    languageDropdownPosition = {
+      top: rect.bottom + 8,
+      left: Math.max(16, left)
+    };
+    showLanguageDropdown = true;
+  }
+
+  onMount(() => {
+    scheduleLanguageRecalc();
+    if (typeof ResizeObserver !== "undefined" && languageFilterEl) {
+      languageResizeObserver = new ResizeObserver(() => scheduleLanguageRecalc());
+      languageResizeObserver.observe(languageFilterEl);
+    }
+  });
+
+  onDestroy(() => {
+    languageResizeObserver?.disconnect();
+    languageResizeObserver = null;
+  });
+
+  $effect(() => {
+    langStats;
+    scheduleLanguageRecalc();
+  });
+
+  const visibleLanguages = $derived(langStats.slice(0, languageVisibleCount));
+  const hiddenLanguages = $derived(langStats.slice(languageVisibleCount));
 
   const filteredRepos = $derived.by(() => {
     let result = searchQuery 
@@ -313,6 +398,10 @@
     } else {
       selectedLanguages = [...selectedLanguages, lang];
     }
+  }
+
+  function getSortedLanguageEntries(languages: Record<string, number> | undefined) {
+    return Object.entries(languages || {}).sort((a, b) => b[1] - a[1]) as Array<[string, number]>;
   }
 
   function formatRelativeTime(timestamp: number) {
@@ -500,9 +589,14 @@
   }
 </script>
 
-{#snippet RepoCard({ repo, status })}
+{#snippet RepoCard(
+  { repo, status }: {
+    repo: RepoMetadata;
+    status: { icon: typeof CheckCircle2; color: string; label: string };
+  }
+)}
   <Card 
-    class="group glass glass-hover border-white/5 flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
+    class="group glass glass-hover border-slate-200/70 flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
     onclick={(e) => {
       if ((e.target as HTMLElement).closest('button')) return;
       openPreview(repo);
@@ -515,26 +609,26 @@
             <h3 class="text-2xl font-black tracking-tight truncate group-hover:text-primary transition-colors">{repo.name}</h3>
             <button 
               onclick={() => openFolder(repo.path)}
-              class="text-[10px] bg-white/5 border border-white/5 hover:border-white/20 px-2 py-0.5 rounded-full font-mono text-muted-foreground truncate max-w-full block hover:text-foreground transition-all"
+              class="text-[10px] bg-white/80 border border-slate-200/70 hover:border-slate-300 px-2 py-0.5 rounded-full font-mono text-muted-foreground truncate max-w-full block hover:text-foreground transition-all"
               title={repo.path}
             >
               {repo.path}
             </button>
           </div>
-          <div class="p-3 bg-white/5 rounded-2xl text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-all duration-500">
+          <div class="p-3 bg-white/80 rounded-2xl text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-all duration-500">
             <GitBranch class="w-5 h-5" />
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
-          <div class="bg-white/5 rounded-2xl p-3 border border-white/5 hover:border-white/10 transition-all">
+          <div class="bg-white/80 rounded-2xl p-3 border border-slate-200/70 hover:border-slate-200/80 transition-all">
             <div class="flex items-center space-x-2 mb-1">
               <GitBranch class="w-3 h-3 text-muted-foreground" />
               <span class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Branch</span>
             </div>
             <p class="text-xs font-bold truncate">{repo.branch}</p>
           </div>
-          <div class="bg-white/5 rounded-2xl p-3 border border-white/5 hover:border-white/10 transition-all">
+          <div class="bg-white/80 rounded-2xl p-3 border border-slate-200/70 hover:border-slate-200/80 transition-all">
             <div class="flex items-center space-x-2 mb-1">
               <status.icon class="w-3 h-3 {status.color}" />
               <span class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Status</span>
@@ -545,9 +639,9 @@
 
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap gap-1.5 min-h-[24px]">
-          {#each Object.entries(repo.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 3) as [lang, count]}
+            {#each getSortedLanguageEntries(repo.languages).slice(0, 3) as [lang, count]}
             {@const icon = getLanguageIcon(lang)}
-            <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground/80">
+            <Badge variant="outline" class="bg-white/80 border-slate-200/70 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground">
               {#if icon}
                 <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1 inline-block align-[-2px]" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
                   <path fill="currentColor" d={icon.path}></path>
@@ -557,7 +651,7 @@
             </Badge>
           {/each}
             {#if Object.keys(repo.languages || {}).length > 3}
-              <Badge variant="outline" class="bg-white/5 border-white/5 text-[8px] px-2 py-0.5 rounded-md font-black">
+              <Badge variant="outline" class="bg-white/80 border-slate-200/70 text-[8px] px-2 py-0.5 rounded-md font-black">
                 +{Object.keys(repo.languages).length - 3}
               </Badge>
             {/if}
@@ -569,7 +663,7 @@
               {@const match = $allTags.find(t => t.name === tagName)}
               <Badge
                 variant="outline"
-                class="bg-white/5 border-white/10 text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1"
+                class="bg-white/80 border-slate-200/80 text-[8px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1"
                 style={`border-color: ${match?.color ?? '#6366f1'}33`}
               >
                 <span
@@ -580,36 +674,36 @@
               </Badge>
             {/each}
             {#if repo.tags.length > 3}
-              <Badge variant="outline" class="bg-white/5 border-white/10 text-[8px] px-2 py-0.5 rounded-full font-black">
+              <Badge variant="outline" class="bg-white/80 border-slate-200/80 text-[8px] px-2 py-0.5 rounded-full font-black">
                 +{repo.tags.length - 3}
               </Badge>
             {/if}
           </div>
 
           {#if repo.description}
-            <p class="text-[13px] text-muted-foreground/90 line-clamp-3 min-h-[3rem] leading-relaxed font-medium">
+            <p class="text-[13px] text-muted-foreground line-clamp-3 min-h-[3rem] leading-relaxed font-medium">
               {repo.description}
             </p>
           {/if}
         </div>
 
         <div class="flex flex-wrap gap-2 pt-2">
-          <Badge variant="outline" class="bg-white/5 border-white/5 text-[10px] px-3 py-1 rounded-full font-bold">
+          <Badge variant="outline" class="bg-white/80 border-slate-200/70 text-[10px] px-3 py-1 rounded-full font-bold">
             <Clock class="w-3 h-3 mr-1.5 text-primary" />
             {formatRelativeTime(repo.last_modified)}
           </Badge>
           {#if repo.remote_url}
-            <Badge variant="outline" class="bg-white/5 border-white/5 text-[10px] px-3 py-1 rounded-full font-bold {repo.remote_reachable ? 'text-emerald-500' : 'text-amber-500 opacity-80'}">
+            <Badge variant="outline" class="bg-white/80 border-slate-200/70 text-[10px] px-3 py-1 rounded-full font-bold {repo.remote_reachable ? 'text-emerald-500' : 'text-amber-500 opacity-80'}">
               <Globe class="w-3 h-3 mr-1.5" />
               {repo.remote_reachable ? 'Connected' : 'Unreachable'}
             </Badge>
           {/if}
         </div>
 
-        <div class="mt-auto pt-8 flex items-center justify-between border-t border-white/5 relative">
-          <div class="flex items-center bg-black/40 rounded-full p-1.5 border border-white/5 shadow-inner">
+        <div class="mt-auto pt-8 flex items-center justify-between border-t border-slate-200/70 relative">
+          <div class="flex items-center bg-white/85 rounded-full p-1.5 border border-slate-200/70 shadow-inner">
             <Button 
-              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-slate-100" 
               onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
               onmouseleave={() => hoveredAction = null}
               disabled={!!actionLoading[`${repo.path}-fetch`]}
@@ -618,7 +712,7 @@
               <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
             </Button>
             <Button 
-              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-slate-100" 
               onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
               onmouseleave={() => hoveredAction = null}
               disabled={!!actionLoading[`${repo.path}-pull`]}
@@ -627,7 +721,7 @@
               <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
             </Button>
             <Button 
-              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-white/5" 
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-slate-100" 
               onmouseenter={() => hoveredAction = { path: repo.path, label: 'Push' }}
               onmouseleave={() => hoveredAction = null}
               disabled={!!actionLoading[`${repo.path}-push`]}
@@ -639,7 +733,7 @@
 
           {#if hoveredAction?.path === repo.path}
             <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-bottom-1 duration-200 z-10">
-              {hoveredAction.label}
+              {hoveredAction?.label}
             </div>
           {/if}
 
@@ -647,7 +741,7 @@
             <Button
               variant="ghost"
               size="icon"
-              class="rounded-full hover:bg-white/5"
+              class="rounded-full hover:bg-slate-100"
               onmouseenter={() => hoveredAction = { path: repo.path, label: 'Explore' }}
               onmouseleave={() => hoveredAction = null}
               onclick={() => openFolder(repo.path)}
@@ -669,7 +763,7 @@
       <!-- List Item -->
       <div class="flex-1 flex items-center justify-between py-2.5 px-6 overflow-hidden gap-8">
         <div class="flex items-center space-x-5 min-w-0 flex-1">
-          <div class="p-2.5 bg-white/5 rounded-2xl text-muted-foreground/60 group-hover:text-primary transition-all duration-500 group-hover:bg-primary/10">
+          <div class="p-2.5 bg-white/80 rounded-2xl text-muted-foreground group-hover:text-primary transition-all duration-500 group-hover:bg-primary/10">
             <GitBranch class="w-5 h-5" />
           </div>
           <div class="min-w-0 flex-1">
@@ -678,7 +772,7 @@
               <div class="flex gap-1">
                 {#each Object.keys(repo.languages || {}).slice(0, 2) as lang}
                   {@const icon = getLanguageIcon(lang)}
-                  <span class="inline-flex items-center text-[8px] px-1.5 py-0.5 bg-white/5 border border-white/5 text-muted-foreground font-black uppercase tracking-widest rounded-md">
+                  <span class="inline-flex items-center text-[8px] px-1.5 py-0.5 bg-white/80 border border-slate-200/70 text-muted-foreground font-black uppercase tracking-widest rounded-md">
                     {#if icon}
                       <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
                         <path fill="currentColor" d={icon.path}></path>
@@ -689,24 +783,22 @@
                 {/each}
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button 
-                onclick={() => openFolder(repo.path)}
-                class="text-[10px] text-muted-foreground/60 font-mono truncate hover:text-primary transition-colors block text-left"
-              >
-                {repo.path}
-              </button>
-              {#if repo.description}
-                 <span class="text-[10px] text-muted-foreground/40 font-medium truncate italic">• {repo.description}</span>
-              {/if}
-            </div>
+            {#if repo.description}
+              <p class="text-[11px] text-muted-foreground font-medium truncate italic mt-1">{repo.description}</p>
+            {/if}
+            <button 
+              onclick={() => openFolder(repo.path)}
+              class="text-[11px] text-muted-foreground font-mono truncate hover:text-primary transition-colors block text-left mt-1.5 w-full"
+            >
+              {repo.path}
+            </button>
             <!-- Inline tag badges -->
             {#if repo.tags.length}
               <div class="flex flex-wrap gap-1 mt-1">
                 {#each repo.tags.slice(0, 3) as tagName}
                   {@const match = $allTags.find(t => t.name === tagName)}
                   <span
-                    class="inline-flex items-center gap-1 text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10"
+                    class="inline-flex items-center gap-1 text-[8px] px-1.5 py-0.5 rounded-full bg-white/80 border border-slate-200/80"
                     style={`border-color: ${match?.color ?? '#6366f1'}33`}
                   >
                     <span
@@ -717,7 +809,7 @@
                   </span>
                 {/each}
                 {#if repo.tags.length > 3}
-                  <span class="text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 font-bold">
+                  <span class="text-[8px] px-1.5 py-0.5 rounded-full bg-white/80 border border-slate-200/80 font-bold">
                     +{repo.tags.length - 3}
                   </span>
                 {/if}
@@ -726,21 +818,21 @@
           </div>
         </div>
 
-        <div class="flex items-center space-x-16 flex-shrink-0">
-          <div class="flex flex-col items-center">
-            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Branch</span>
-            <span class="text-sm font-bold tracking-tight">{repo.branch}</span>
+        <div class="flex items-center gap-10 flex-shrink-0">
+          <div class="w-32 flex flex-col items-center">
+            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Branch</span>
+            <span class="text-sm font-bold tracking-tight truncate max-w-[120px]">{repo.branch}</span>
           </div>
-          <div class="flex flex-col items-center">
-            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Status</span>
+          <div class="w-32 flex flex-col items-center">
+            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Status</span>
             <div class="flex items-center space-x-2">
               <status.icon class="w-4 h-4 {status.color}" />
               <span class="text-sm font-bold tracking-tight {status.color}">{status.label}</span>
             </div>
           </div>
-          <div class="flex flex-col items-center">
-            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground/40 mb-1.5">Activity</span>
-            <span class="text-sm font-bold text-muted-foreground/80 tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
+          <div class="w-32 flex flex-col items-center">
+            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Activity</span>
+            <span class="text-sm font-bold text-muted-foreground tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
           </div>
         </div>
 
@@ -748,24 +840,13 @@
           <Button
             variant="ghost"
             size="icon"
-            class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary transition-all"
-            onmouseenter={() => hoveredAction = { path: repo.path, label: 'Inspect' }}
-            onmouseleave={() => hoveredAction = null}
-            onclick={() => openPreview(repo)}
-          >
-            <Eye class="w-5 h-5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary transition-all"
+            class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-primary transition-all"
             onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
           >
             <Tag class="w-4 h-4" />
           </Button>
-          <div class="h-8 w-px bg-white/5 mx-1"></div>
           <Button 
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-emerald-500" 
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-emerald-500" 
              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
              onmouseleave={() => hoveredAction = null}
              disabled={!!actionLoading[`${repo.path}-fetch`]}
@@ -774,7 +855,7 @@
             <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
           </Button>
           <Button 
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-primary" 
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-primary" 
              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
              onmouseleave={() => hoveredAction = null}
              disabled={!!actionLoading[`${repo.path}-pull`]}
@@ -783,7 +864,7 @@
             <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
           </Button>
           <Button 
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-white/5 hover:text-blue-500" 
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-blue-500" 
              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Finder' }}
              onmouseleave={() => hoveredAction = null}
              onclick={() => openFolder(repo.path)}
@@ -793,7 +874,7 @@
 
           {#if hoveredAction?.path === repo.path}
             <div class="absolute -top-12 right-0 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-right-1 duration-200 z-10 whitespace-nowrap">
-              {hoveredAction.label}
+              {hoveredAction?.label}
             </div>
           {/if}
         </div>
@@ -804,139 +885,175 @@
 
 <div class="p-8 space-y-8 animate-in fade-in duration-500 max-w-7xl mx-auto">
   <!-- Header / Filters -->
-  <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
-    <div class="space-y-4 flex-1">
-      <div>
-        <h1 class="text-5xl font-black tracking-tighter text-glow mb-2">Vessels in Dock</h1>
-        <p class="text-muted-foreground text-xl">Managing <span class="text-primary font-bold">{repos.length}</span> repositories.</p>
-      </div>
-      
-      <div class="flex flex-wrap items-center gap-3">
+  <div class="space-y-5">
+    <div>
+      <h1 class="text-5xl font-black tracking-tighter text-glow mb-2">Vessels in Dock</h1>
+      <p class="text-muted-foreground text-xl">Managing <span class="text-primary font-bold">{repos.length}</span> repositories.</p>
+    </div>
+
+    <div class="flex flex-nowrap items-center gap-4 overflow-x-hidden overflow-y-visible">
+      <div class="flex flex-nowrap items-center gap-3 flex-1 min-w-0">
         <!-- Fuzzy Search -->
-        <div class="relative group min-w-[300px]">
+        <div class="relative group w-[260px] md:w-[320px] shrink-0">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
           <input 
             type="text" 
             bind:value={searchQuery}
             placeholder="Fuzzy search projects..." 
-            class="bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-primary/40 focus:bg-white/10 transition-all font-medium"
+            class="bg-white/80 border border-slate-200/80 rounded-xl pl-10 pr-4 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-primary/40 focus:bg-white/10 transition-all font-medium"
           />
         </div>
 
         <!-- Language Filter -->
-        <div class="flex flex-wrap items-center gap-1.5 bg-white/5 rounded-xl border border-white/10 p-1.5 max-w-full">
-          <button 
-            onclick={() => selectedLanguages = []}
-            class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border border-transparent {selectedLanguages.length === 0 ? 'bg-primary text-primary-foreground shadow-glow border-primary/20' : 'hover:bg-white/5 text-muted-foreground'}"
-          >
-            All
-          </button>
-          
-          {#each visibleLanguages as lang}
-            {@const icon = getLanguageIcon(lang.name)}
+        <div
+          class="relative flex flex-nowrap items-center gap-1.5 bg-white/80 rounded-xl border border-slate-200/80 p-1.5 max-w-full min-w-0 flex-1"
+          bind:this={languageFilterEl}
+        >
+          <div class="flex flex-nowrap items-center gap-1.5 overflow-hidden min-w-0 flex-1">
             <button 
-              onclick={() => toggleLanguage(lang.name)}
-              class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border whitespace-nowrap {selectedLanguages.includes(lang.name) ? 'bg-white/10 text-primary border-primary/40 shadow-glow' : 'hover:bg-white/5 text-muted-foreground border-transparent'}"
+              onclick={() => selectedLanguages = []}
+              class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border border-transparent shrink-0 {selectedLanguages.length === 0 ? 'bg-primary text-primary-foreground shadow-glow border-primary/20' : 'hover:bg-slate-100 text-muted-foreground'}"
             >
-              <div class="flex items-center gap-2">
-                {#if icon}
-                  <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
-                    <path fill="currentColor" d={icon.path}></path>
-                  </svg>
-                {/if}
-                {lang.name}
-                <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
-                {#if selectedLanguages.includes(lang.name)}
-                  <Check class="w-3 h-3" />
-                {/if}
-              </div>
+              All
             </button>
-          {/each}
+            
+            {#each visibleLanguages as lang}
+              {@const icon = getLanguageIcon(lang.name)}
+              <button 
+                onclick={() => toggleLanguage(lang.name)}
+                class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border whitespace-nowrap shrink-0 {selectedLanguages.includes(lang.name) ? 'bg-white/10 text-primary border-primary/40 shadow-glow' : 'hover:bg-slate-100 text-muted-foreground border-transparent'}"
+              >
+                <div class="flex items-center gap-2">
+                  {#if icon}
+                    <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
+                      <path fill="currentColor" d={icon.path}></path>
+                    </svg>
+                  {/if}
+                  {lang.name}
+                  <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
+                  {#if selectedLanguages.includes(lang.name)}
+                    <Check class="w-3 h-3" />
+                  {/if}
+                </div>
+              </button>
+            {/each}
+          </div>
 
           {#if hiddenLanguages.length > 0}
-            <div class="relative">
+            <div class="shrink-0">
               <button 
-                onclick={() => showLanguageDropdown = !showLanguageDropdown}
-                class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border whitespace-nowrap {hiddenLanguages.some(l => selectedLanguages.includes(l.name)) ? 'bg-white/10 text-primary border-primary/40' : 'hover:bg-white/5 text-muted-foreground border-transparent'}"
+                bind:this={languageDropdownAnchor}
+                onclick={toggleLanguageDropdown}
+                class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all border whitespace-nowrap {hiddenLanguages.some(l => selectedLanguages.includes(l.name)) ? 'bg-white/10 text-primary border-primary/40' : 'hover:bg-slate-100 text-muted-foreground border-transparent'}"
               >
                 +{hiddenLanguages.length}
               </button>
-              
-              {#if showLanguageDropdown}
-                <div 
-                  use:clickOutside={() => showLanguageDropdown = false}
-                  class="absolute top-full right-0 mt-3 w-56 bg-background/98 border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl z-[100] p-3 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200 ring-1 ring-white/5"
-                >
-                  <div class="px-3 py-2 mb-2 border-b border-white/5">
-                    <span class="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">More Languages</span>
-                  </div>
-                  <div class="max-h-64 overflow-y-auto space-y-1 custom-scrollbar pr-1">
-                    {#each hiddenLanguages as lang}
-                      {@const icon = getLanguageIcon(lang.name)}
-                      <button 
-                        onclick={(e) => { e.stopPropagation(); toggleLanguage(lang.name); showLanguageDropdown = false; }}
-                        class="w-full text-left px-3 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all flex items-center justify-between group {selectedLanguages.includes(lang.name) ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}"
-                      >
-                        <div class="flex items-center gap-2 truncate">
-                          {#if icon}
-                            <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
-                              <path fill="currentColor" d={icon.path}></path>
-                            </svg>
-                          {/if}
-                          <span>{lang.name}</span>
-                          <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
-                        </div>
-                        {#if selectedLanguages.includes(lang.name)}
-                          <Check class="w-3.5 h-3.5 text-primary" />
-                        {:else}
-                          <div class="w-1.5 h-1.5 rounded-full bg-white/5 group-hover:bg-primary/40 transition-colors"></div>
-                        {/if}
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
             </div>
           {/if}
         </div>
-      </div>
-    </div>
 
-        <div class="flex items-center space-x-3">
-      <div class="bg-white/5 rounded-xl border border-white/10 p-1 flex items-center">
-        <button 
-          onclick={() => viewMode = 'grid'}
-          class="p-2 rounded-lg transition-all {viewMode === 'grid' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-white/5'}"
+        {#if showLanguageDropdown && languageDropdownPosition}
+          <div 
+            use:clickOutside={() => { showLanguageDropdown = false; languageDropdownPosition = null; }}
+            class="fixed w-56 bg-background/98 border border-slate-200/80 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl z-[110] p-3 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200 ring-1 ring-slate-200/70"
+            style={`top: ${languageDropdownPosition.top}px; left: ${languageDropdownPosition.left}px;`}
+          >
+            <div class="px-3 py-2 mb-2 border-b border-slate-200/70">
+              <span class="text-[9px] font-black uppercase tracking-[0.2em] text-muted-foreground">More Languages</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto space-y-1 custom-scrollbar pr-1">
+              {#each hiddenLanguages as lang}
+                {@const icon = getLanguageIcon(lang.name)}
+                <button 
+                  onclick={(e) => { e.stopPropagation(); toggleLanguage(lang.name); showLanguageDropdown = false; languageDropdownPosition = null; }}
+                  class="w-full text-left px-3 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-100 transition-all flex items-center justify-between group {selectedLanguages.includes(lang.name) ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}"
+                >
+                  <div class="flex items-center gap-2 truncate">
+                    {#if icon}
+                      <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang.name} icon`}>
+                        <path fill="currentColor" d={icon.path}></path>
+                      </svg>
+                    {/if}
+                    <span>{lang.name}</span>
+                    <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
+                  </div>
+                  {#if selectedLanguages.includes(lang.name)}
+                    <Check class="w-3.5 h-3.5 text-primary" />
+                  {:else}
+                    <div class="w-1.5 h-1.5 rounded-full bg-white/80 group-hover:bg-primary/40 transition-colors"></div>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <div
+          class="absolute -left-[9999px] -top-[9999px] opacity-0 pointer-events-none"
+          aria-hidden="true"
+          bind:this={languageMeasureEl}
         >
-          <LayoutGrid class="w-4 h-4" />
-        </button>
-        <button 
-          onclick={() => viewMode = 'list'}
-          class="p-2 rounded-lg transition-all {viewMode === 'list' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-white/5'}"
-        >
-          <LayoutList class="w-4 h-4" />
-        </button>
-      </div>
-      
-      <div class="bg-white/5 rounded-xl border border-white/10 p-1 flex items-center gap-1">
-        <span class="px-2 text-[9px] uppercase tracking-[0.25em] text-muted-foreground/70">Group By</span>
-        <button 
-          onclick={() => setGroupByMode('none')}
-          class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all {groupByMode === 'none' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-white/5'}"
-        >
-          None
-        </button>
-        <button 
-          onclick={() => setGroupByMode('language')}
-          class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all {groupByMode === 'language' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-white/5'}"
-        >
-          Language
-        </button>
+          <div class="flex flex-nowrap items-center gap-1.5">
+            <button data-all-chip class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg border border-transparent">
+              All
+            </button>
+            {#each langStats as lang}
+              {@const icon = getLanguageIcon(lang.name)}
+              <button data-lang-chip class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg border whitespace-nowrap">
+                <div class="flex items-center gap-2">
+                  {#if icon}
+                    <svg viewBox="0 0 24 24" class="w-3 h-3 shrink-0" aria-hidden="true">
+                      <path fill="currentColor" d={icon.path}></path>
+                    </svg>
+                  {/if}
+                  {lang.name}
+                  <span class="opacity-40 text-[8px] font-medium">{lang.count}</span>
+                </div>
+              </button>
+            {/each}
+            <button data-more-chip class="px-3.5 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg border whitespace-nowrap">
+              +999
+            </button>
+          </div>
+        </div>
       </div>
 
-      <Button variant="outline" size="icon" class="rounded-xl border-white/10" onclick={refreshRepos} disabled={isScanning}>
-        <RefreshCw class="w-4 h-4 {isScanning ? 'animate-spin text-primary' : ''}" />
-      </Button>
+      <div class="flex items-center gap-3 shrink-0 ml-auto">
+        <div class="bg-white/80 rounded-xl border border-slate-200/80 p-1 flex items-center">
+          <button 
+            onclick={() => viewMode = 'grid'}
+            class="p-2 rounded-lg transition-all {viewMode === 'grid' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-slate-100'}"
+          >
+            <LayoutGrid class="w-4 h-4" />
+          </button>
+          <button 
+            onclick={() => viewMode = 'list'}
+            class="p-2 rounded-lg transition-all {viewMode === 'list' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-slate-100'}"
+          >
+            <LayoutList class="w-4 h-4" />
+          </button>
+        </div>
+        
+        <div class="bg-white/80 rounded-xl border border-slate-200/80 p-1 flex items-center gap-1">
+          <span class="px-2 text-[9px] uppercase tracking-[0.25em] text-muted-foreground">Group By</span>
+          <button 
+            onclick={() => setGroupByMode('none')}
+            class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all {groupByMode === 'none' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-slate-100'}"
+          >
+            None
+          </button>
+          <button 
+            onclick={() => setGroupByMode('language')}
+            class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all {groupByMode === 'language' ? 'bg-white/10 text-primary shadow-inner' : 'text-muted-foreground hover:bg-slate-100'}"
+          >
+            Language
+          </button>
+        </div>
+
+        <Button variant="outline" size="icon" class="rounded-xl border-slate-200/80" onclick={refreshRepos} disabled={isScanning}>
+          <RefreshCw class="w-4 h-4 {isScanning ? 'animate-spin text-primary' : ''}" />
+        </Button>
+      </div>
     </div>
   </div>
 
@@ -951,7 +1068,7 @@
     </div>
   {:else if filteredRepos.length === 0}
     <div class="py-32 glass rounded-3xl flex flex-col items-center justify-center space-y-8 text-center px-6">
-      <div class="relative p-8 rounded-full bg-white/5 border border-white/10">
+      <div class="relative p-8 rounded-full bg-white/80 border border-slate-200/80">
         <Search class="w-16 h-16 text-primary opacity-20" />
       </div>
       <div class="space-y-3">
@@ -973,7 +1090,7 @@
             onToggle={() => toggleGroupCollapse(label)}
           >
             {#snippet children()}
-              <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2" : "space-y-2 mt-2"}>
+              <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-3" : "space-y-3 mt-3"}>
                 {#each group as repo (repo.path)}
                   {@const status = getSyncStatusDetails(repo.sync_status)}
                   {@render RepoCard({ repo, status })}
@@ -997,22 +1114,22 @@
 {#if tagPopoverOpen && tagPopoverRepo && tagPopoverPosition}
   <button 
     type="button"
-    class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[80]"
+    class="fixed inset-0 bg-slate-900/20 backdrop-blur-[2px] z-[80]"
     onclick={closeTagPopover}
     aria-label="Close tag selector"
   ></button>
   <div
-    class="fixed w-72 bg-background/95 border border-white/10 rounded-2xl shadow-2xl z-[81] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-200"
+    class="fixed w-72 bg-background/95 border border-slate-200/80 rounded-2xl shadow-2xl z-[81] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-200"
     style={`top: ${tagPopoverPosition.top}px; left: ${tagPopoverPosition.left}px; transform: translateY(-100%);`}
     use:clickOutside={closeTagPopover}
   >
     <div class="flex items-center justify-between mb-1">
       <div class="space-y-0.5">
-        <p class="text-[10px] uppercase tracking-[0.25em] text-muted-foreground/70 font-black">Tags</p>
+        <p class="text-[10px] uppercase tracking-[0.25em] text-muted-foreground font-black">Tags</p>
         <p class="text-xs font-semibold truncate">{tagPopoverRepo.name}</p>
       </div>
       <button
-        class="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-muted-foreground"
+        class="w-6 h-6 rounded-full bg-white/80 hover:bg-slate-100 flex items-center justify-center text-muted-foreground"
         onclick={closeTagPopover}
       >
         <X class="w-3 h-3" />
@@ -1026,12 +1143,12 @@
         {#each $allTags as tag}
           {@const checked = repoHasTag(tagPopoverRepo, tag)}
           <button
-            class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] hover:bg-white/5 border border-transparent"
-            onclick={() => toggleTagForRepo(tagPopoverRepo, tag)}
+            class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] hover:bg-slate-100 border border-transparent"
+            onclick={() => tagPopoverRepo && toggleTagForRepo(tagPopoverRepo, tag)}
           >
             <div class="flex items-center gap-2 min-w-0">
               <span
-                class="w-2 h-2 rounded-full border border-white/20"
+                class="w-2 h-2 rounded-full border border-slate-300"
                 style={`background: ${tag.color}`}
               ></span>
               <span class="truncate">{tag.name}</span>
@@ -1049,26 +1166,26 @@
 <!-- Side Panel (README Preview) -->
 {#if selectedRepoForPreview}
   <div 
-    class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] transition-all duration-300"
+    class="fixed inset-0 bg-slate-900/20 backdrop-blur-[2px] z-[100] transition-all duration-300"
     onclick={closePreview}
     aria-hidden="true"
   ></div>
   <div 
-    class="fixed top-0 right-0 h-full w-[45%] bg-background border-l border-white/10 z-[101] flex flex-col shadow-2xl animate-in slide-in-from-right duration-500 ease-out"
+    class="fixed top-0 right-0 h-full w-[45%] bg-background border-l border-slate-200/80 z-[101] flex flex-col shadow-2xl animate-in slide-in-from-right duration-500 ease-out"
   >
-    <div class="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
+    <div class="p-6 border-b border-slate-200/70 flex items-center justify-between bg-white/80">
       <div class="space-y-1">
         <h2 class="text-xl font-black uppercase tracking-widest">{selectedRepoForPreview.name}</h2>
         <p class="text-[10px] text-muted-foreground font-mono">{selectedRepoForPreview.path}</p>
       </div>
-      <Button variant="ghost" size="icon" class="rounded-xl hover:bg-white/10" onclick={closePreview}>
+      <Button variant="ghost" size="icon" class="rounded-xl hover:bg-slate-100" onclick={closePreview}>
         <X class="w-5 h-5" />
       </Button>
     </div>
 
     <!-- Mode Selector -->
-    <div class="px-6 py-4 flex items-center justify-between border-b border-white/5 bg-white/[0.02]">
-      <div class="flex items-center space-x-2 bg-white/5 p-1 rounded-xl border border-white/10">
+    <div class="px-6 py-4 flex items-center justify-between border-b border-slate-200/70 bg-white/[0.02]">
+      <div class="flex items-center space-x-2 bg-white/80 p-1 rounded-xl border border-slate-200/80">
         <button 
           onclick={() => previewMode = 'markdown'}
           class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'markdown' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
@@ -1090,17 +1207,17 @@
       </div>
       
       <div class="flex items-center gap-2">
-         <Button variant="outline" size="sm" class="h-8 rounded-lg border-white/10 text-[10px] font-bold uppercase tracking-widest bg-white/5 hover:bg-white/10" onclick={() => openFolder(selectedRepoForPreview.path)}>
+         <Button variant="outline" size="sm" class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100" onclick={() => selectedRepoForPreview && openFolder(selectedRepoForPreview.path)}>
            <FolderOpen class="w-3 h-3 mr-2 text-primary" />
            Open Folder
          </Button>
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-12 prose prose-invert prose-lg prose-neutral max-w-none no-scrollbar 
+    <div class="flex-1 overflow-y-auto p-12 prose prose-lg prose-neutral max-w-none no-scrollbar 
       prose-a:text-primary prose-a:no-underline hover:prose-a:underline
       prose-blockquote:border-l-primary prose-blockquote:bg-primary/5 prose-blockquote:rounded-r-2xl prose-blockquote:py-2
-      prose-img:rounded-3xl prose-img:border prose-img:border-white/10 prose-img:shadow-2xl">
+      prose-img:rounded-3xl prose-img:border prose-img:border-slate-200/80 prose-img:shadow-2xl">
       {#if readmeLoading}
         <div class="h-full flex flex-col items-center justify-center space-y-6 py-48">
           <div class="relative w-16 h-16">
@@ -1117,7 +1234,7 @@
             {@html readmeContent.html}
           </div>
         {:else if previewMode === 'text'}
-          <pre class="bg-black/40 p-10 rounded-[2.5rem] border border-white/10 font-mono text-[15px] leading-relaxed text-muted-foreground/90 whitespace-pre-wrap animate-in fade-in duration-500 shadow-2xl overflow-x-auto">
+          <pre class="bg-white/85 p-10 rounded-[2.5rem] border border-slate-200/80 font-mono text-[15px] leading-relaxed text-muted-foreground whitespace-pre-wrap animate-in fade-in duration-500 shadow-2xl overflow-x-auto">
             {readmeContent.raw}
           </pre>
         {:else}
@@ -1125,7 +1242,7 @@
             <div class="space-y-4">
               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Metadata Summary</h3>
               <div class="grid grid-cols-2 gap-4">
-                 <div class="bg-white/5 p-5 rounded-2xl border border-white/5">
+                 <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70">
                    <p class="text-[9px] text-muted-foreground uppercase font-black mb-1.5 tracking-widest">Active Branch</p>
                    <div class="flex items-center gap-2.5">
                      <div class="p-1.5 bg-primary/10 rounded-lg text-primary">
@@ -1134,7 +1251,7 @@
                      <span class="text-sm font-bold tracking-tight">{selectedRepoForPreview.branch}</span>
                    </div>
                  </div>
-                 <div class="bg-white/5 p-5 rounded-2xl border border-white/5">
+                 <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70">
                    <p class="text-[9px] text-muted-foreground uppercase font-black mb-1.5 tracking-widest">Dock Progress</p>
                    <div class="flex items-center gap-2.5">
                      <div class="p-1.5 bg-amber-500/10 rounded-lg text-amber-500">
@@ -1149,9 +1266,9 @@
             <div class="space-y-4">
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Manifested Artifacts</h3>
                <div class="flex flex-wrap gap-2.5">
-                 {#each Object.entries(selectedRepoForPreview.languages).sort((a, b) => b[1] - a[1]) as [lang, count]}
+                 {#each getSortedLanguageEntries(selectedRepoForPreview.languages) as [lang, count]}
                    {@const icon = getLanguageIcon(lang)}
-                   <div class="bg-white/[0.03] px-5 py-3 rounded-2xl border border-white/5 flex items-center gap-4 hover:border-primary/20 transition-colors">
+                   <div class="bg-white/90 px-5 py-3 rounded-2xl border border-slate-200/70 flex items-center gap-4 hover:border-primary/20 transition-colors">
                      {#if icon}
                        <svg viewBox="0 0 24 24" class="w-4 h-4 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
                          <path fill="currentColor" d={icon.path}></path>
@@ -1160,7 +1277,7 @@
                        <div class="w-2 h-2 rounded-full bg-primary/40"></div>
                      {/if}
                      <span class="text-xs font-bold uppercase tracking-wider">{lang}</span>
-                     <span class="text-[9px] font-black p-1 bg-white/5 rounded border border-white/5 text-muted-foreground">{count}</span>
+                     <span class="text-[9px] font-black p-1 bg-white/80 rounded border border-slate-200/70 text-muted-foreground">{count}</span>
                    </div>
                  {/each}
                </div>
@@ -1177,7 +1294,7 @@
             
             <div class="space-y-4">
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Remote Link</h3>
-               <div class="bg-white/5 p-5 rounded-2xl border border-white/5 flex items-center justify-between">
+               <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
                  <div class="flex items-center gap-3">
                     <Globe class="w-4 h-4 text-muted-foreground" />
                     <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">{selectedRepoForPreview.remote_url || 'No Remote Configured'}</span>
