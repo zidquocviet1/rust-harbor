@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @import "tw-animate-css";
@@ -6,7 +6,8 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
+  --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --radius: 0.85rem;
@@ -73,6 +74,7 @@
 
 @theme inline {
   --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
   --font-mono: var(--font-mono);
 
   --radius-sm: calc(var(--radius) - 4px);
@@ -109,6 +111,7 @@
   }
 
   h1, h2, h3, h4 {
+    font-family: var(--font-display);
     @apply tracking-tight text-[color:var(--text-primary)];
   }
 
@@ -137,6 +140,36 @@
       linear-gradient(to right, oklch(0.92 0.008 240 / 0.45) 1px, transparent 1px),
       linear-gradient(to bottom, oklch(0.92 0.008 240 / 0.45) 1px, transparent 1px);
     background-size: 36px 36px;
+  }
+
+  .sidebar-shell {
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    letter-spacing: 0.01em;
+  }
+
+  .sidebar-title {
+    font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    font-size: 18px;
+    line-height: 1.2;
+  }
+
+  .sidebar-kicker {
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+  }
+
+  .sidebar-meta {
+    font-size: 12px;
+  }
+
+  .sidebar-item {
+    font-size: 14px;
+  }
+
+  .readme-image {
+    background: linear-gradient(120deg, oklch(0.96 0.01 220), oklch(0.99 0.004 220));
   }
 }
 

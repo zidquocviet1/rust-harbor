@@ -7,6 +7,7 @@
   import GitMissingError from '$lib/components/custom/GitMissingError.svelte';
   import { Toaster } from "$lib/components/ui/sonner";
   import { page } from '$app/state';
+  import { APP_BRANDING } from '$lib/config/branding';
   import { 
     allTags, 
     selectedTagIds, 
@@ -33,6 +34,7 @@
   let contextMenuPosition = $state<{ x: number; y: number } | null>(null);
   let pendingDeleteTag: Tag | null = $state(null);
   let showDeleteDialog = $state(false);
+  let tagSearch = $state("");
 
   onMount(async () => {
     try {
@@ -121,7 +123,7 @@
 </script>
 
 <svelte:head>
-  <title>Rust Harbor — Local Git Command Center</title>
+  <title>{APP_BRANDING.title}</title>
 </svelte:head>
 
 <Toaster position="bottom-right" richColors theme="light" />
@@ -145,7 +147,7 @@
           </div>
         </div>
         <div class="text-center space-y-1">
-          <p class="text-xl font-bold tracking-tight text-glow">Rust Harbor</p>
+          <p class="text-xl font-bold tracking-tight text-glow">{APP_BRANDING.name}</p>
           <p class="text-xs text-muted-foreground uppercase tracking-[0.2em] font-medium animate-pulse">Initializing System</p>
         </div>
       </div>
@@ -155,55 +157,45 @@
   {:else}
     <div class="flex min-h-screen">
       <!-- Sidebar -->
-      <aside class="w-64 border-r border-slate-200/70 glass flex flex-col sticky top-0 h-screen z-50">
-        <div class="p-6 border-b border-slate-200/70 flex items-center space-x-3">
-          <div class="p-2 bg-primary rounded-lg text-primary-foreground shadow-lg shadow-primary/20">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-anchor"><circle cx="12" cy="5" r="3"/><path d="M12 22V8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg>
+      <aside class="w-72 border-r border-slate-200/70 glass flex flex-col sticky top-0 h-screen z-50 sidebar-shell">
+        <div class="p-5 flex items-center space-x-3 shadow-[0_1px_0_rgba(15,23,42,0.06)]">
+          <div class="p-2.5 bg-primary rounded-lg text-primary-foreground shadow-lg shadow-primary/20">
+            <svelte:component this={APP_BRANDING.icon} className="w-5 h-5" />
           </div>
           <div>
-            <h1 class="text-xl font-bold tracking-tight text-glow">Harbor</h1>
-            <p class="text-[9px] uppercase tracking-[0.2em] font-semibold text-primary/80">Command Center</p>
+            <h1 class="sidebar-title font-semibold tracking-tight text-glow">{APP_BRANDING.shortName}</h1>
+            <p class="sidebar-kicker font-semibold text-primary/80">{APP_BRANDING.tagline}</p>
           </div>
         </div>
 
         <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
           <a 
             href="/" 
-            class="flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 group {page.url.pathname === '/' ? 'bg-primary/14 text-primary border border-primary/25' : 'hover:bg-slate-100/80 text-muted-foreground'}"
+            class="sidebar-item flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group {page.url.pathname === '/' ? 'bg-primary/12 text-primary border border-primary/30 shadow-sm shadow-primary/20' : 'hover:bg-slate-100/80 text-muted-foreground border border-transparent hover:border-slate-200/80'}"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-layout-list group-hover:text-primary transition-colors"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
             <span class="font-medium">Repository List</span>
           </a>
           <a 
             href="/settings" 
-            class="flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-300 group {page.url.pathname === '/settings' ? 'bg-primary/14 text-primary border border-primary/25' : 'hover:bg-slate-100/80 text-muted-foreground'}"
+            class="sidebar-item flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group {page.url.pathname === '/settings' ? 'bg-primary/12 text-primary border border-primary/30 shadow-sm shadow-primary/20' : 'hover:bg-slate-100/80 text-muted-foreground border border-transparent hover:border-slate-200/80'}"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-folder-cog group-hover:text-primary transition-colors"><path d="M10.5 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v3.3"/><circle cx="18" cy="18" r="3"/><path d="M18 14v1"/><path d="M18 21v1"/><path d="M22 18h-1"/><path d="M15 18h-1"/><path d="M21 15l-.7.7"/><path d="M15.7 20.3l-.7.7"/><path d="M21 21l-.7-.7"/><path d="M15.7 15.7l-.7-.7"/></svg>
             <span class="font-medium">Watched Folders</span>
           </a>
 
           <!-- Tags Section -->
-          <div class="mt-6">
-            <div 
-              role="button"
-              tabindex="0"
-              class="flex items-center justify-between px-4 py-2 rounded-xl bg-white/70 border border-slate-200/80 cursor-pointer group text-left shadow-sm"
-              onclick={() => tagsCollapsed = !tagsCollapsed}
-              onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (tagsCollapsed = !tagsCollapsed)}
-            >
-              <div class="flex items-center gap-2">
-                <div class="p-1.5 rounded-lg bg-primary/10 text-primary shadow-sm shadow-primary/30">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v2.5"/><path d="M3 7v12a2 2 0 0 0 2 2h9"/><path d="M18 15v6"/><path d="M15 18h6"/></svg>
-                </div>
-                <div class="flex flex-col">
-                  <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                    Tags
-                  </span>
-                  <span class="text-xs font-medium text-muted-foreground">
-                    {$allTags.reduce((acc, t) => acc + t.repo_count, 0)} repos
-                  </span>
-                </div>
-              </div>
+          <div class="mt-6 space-y-3">
+            <div class="flex items-center justify-between px-4">
+              <button
+                type="button"
+                class="sidebar-item flex items-center space-x-3 text-left group py-3"
+                aria-expanded={!tagsCollapsed}
+                onclick={() => tagsCollapsed = !tagsCollapsed}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px] text-muted-foreground group-hover:text-primary transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 11 3H4a1 1 0 0 0-1 1v7l9.59 9.59a2 2 0 0 0 2.82 0l5.18-5.18a2 2 0 0 0 0-2.82Z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                <span class="sidebar-item font-medium text-foreground">Tags</span>
+              </button>
               <div class="flex items-center gap-1">
                 <button 
                   type="button"
@@ -217,42 +209,41 @@
                   type="button"
                   aria-label={tagsCollapsed ? "Expand tag section" : "Collapse tag section"}
                   class="p-1.5 rounded-lg hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"
+                  onclick={() => tagsCollapsed = !tagsCollapsed}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 transform transition-transform duration-300 {tagsCollapsed ? '-rotate-90' : 'rotate-0'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transform transition-transform duration-300 {tagsCollapsed ? '-rotate-90' : 'rotate-0'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
               </div>
             </div>
 
             {#if !tagsCollapsed}
-              <div class="mt-3 space-y-2">
+              <div class="space-y-2 pl-8">
                 <!-- Empty state -->
                 {#if !$allTags.length && !creatingTag}
-                  <div class="px-4 py-3 rounded-xl border border-dashed border-slate-300/80 bg-white/70 text-xs text-muted-foreground flex items-center justify-between">
+                  <button
+                    type="button"
+                    class="w-full px-3 py-3 rounded-xl border border-dashed border-slate-300/80 bg-white/80 text-[13px] text-muted-foreground flex items-center justify-between hover:border-slate-400 hover:bg-white transition-colors"
+                    onclick={handleCreateTag}
+                  >
                     <div class="flex items-center gap-2">
-                      <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                      <div class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
                       </div>
                       <span>Create your first tag</span>
                     </div>
-                    <button 
-                      class="text-[10px] font-bold uppercase tracking-[0.2em] text-primary hover:text-primary/80"
-                      onclick={handleCreateTag}
-                    >
-                      New
-                    </button>
-                  </div>
+                  </button>
                 {/if}
 
                 <!-- Create inline -->
                 {#if creatingTag}
-                  <div class="px-4 py-3 rounded-xl border border-primary/40 bg-primary/5 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <div class="px-3 py-3 rounded-xl border border-primary/40 bg-primary/5 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
                     <input
-                      class="w-full bg-white border border-slate-300/80 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      class="w-full bg-white border border-slate-300/80 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-primary/30"
                       placeholder="Tag name..."
                       bind:value={newTagName}
                       onkeydown={(e) => e.key === 'Enter' && confirmCreateTag()}
                     />
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex flex-wrap gap-1.5">
                       {#each PALETTE as color}
                         <button
                           type="button"
@@ -265,13 +256,13 @@
                     </div>
                     <div class="flex justify-end gap-2">
                       <button
-                        class="text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
+                        class="text-[11px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
                         onclick={() => { creatingTag = false; newTagName = ''; }}
                       >
                         Cancel
                       </button>
                       <button
-                        class="text-[10px] uppercase tracking-[0.2em] text-primary hover:text-primary/80"
+                        class="text-[11px] uppercase tracking-[0.2em] text-primary hover:text-primary/80"
                         onclick={confirmCreateTag}
                       >
                         Create
@@ -280,25 +271,20 @@
                   </div>
                 {/if}
 
-                <!-- "All" + list -->
+                <!-- Search + list -->
                 {#if $allTags.length}
-                  <div class="flex items-center justify-between px-4 text-[10px] text-muted-foreground mb-1">
-                    <button
-                      class="uppercase tracking-[0.2em] font-bold hover:text-foreground { $selectedTagIds.size === 0 ? 'text-primary' : '' }"
-                      onclick={clearTagFilters}
-                    >
-                      All
-                    </button>
-                    <span class="uppercase tracking-[0.2em]">
-                      {#if $tagLoading}Loading...{:else}{$allTags.length} tags{/if}
-                    </span>
-                  </div>
+                  <input
+                    class="w-full bg-white/80 border border-slate-200/80 rounded-lg px-3 py-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    placeholder="Search tags..."
+                    bind:value={tagSearch}
+                  />
 
-                  <div class="space-y-1 max-h-64 overflow-y-auto pr-1">
-                    {#each $allTags as tag (tag.id)}
+                  <div class="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {#each $allTags.filter((t) => t.name.toLowerCase().includes(tagSearch.trim().toLowerCase())) as tag (tag.id)}
                       {@const isSelected = $selectedTagIds.has(tag.id)}
                       <button
-                        class="w-full flex items-center justify-between px-4 py-2 rounded-lg text-xs transition-all border {isSelected ? 'bg-primary/16 border-primary/40 ring-2 ring-primary/20 text-primary shadow-sm' : 'bg-white/70 border-slate-200/70 hover:bg-slate-100 text-muted-foreground'}"
+                        class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] transition-all text-muted-foreground hover:bg-slate-100 {isSelected ? 'text-foreground' : ''}"
+                        style={isSelected ? `background-color: ${tag.color}22` : ''}
                         onclick={() => toggleTagFilter(tag.id)}
                         oncontextmenu={(e) => handleTagContextMenu(e as MouseEvent, tag)}
                         in:fly={{ y: -8, duration: 180 }}
@@ -306,12 +292,12 @@
                       >
                         <div class="flex items-center gap-2 min-w-0">
                           <span
-                            class="w-2 h-2 rounded-full border border-slate-300 shrink-0"
+                            class="w-2.5 h-2.5 rounded-full border border-slate-300 shrink-0"
                             style={`background: ${tag.color}`}
                           ></span>
                           {#if renamingTagId === tag.id}
                             <input
-                              class="bg-white border border-slate-300 rounded px-2 py-0.5 text-[11px] w-full"
+                              class="bg-white border border-slate-300 rounded px-2 py-1 text-[12px] w-full"
                               bind:value={renameValue}
                               onclick={(e) => e.stopPropagation()}
                               onkeydown={(e) => {
@@ -323,7 +309,7 @@
                             <span class="truncate">{tag.name}</span>
                           {/if}
                         </div>
-                        <span class="text-[9px] px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                        <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-foreground/70">
                           {tag.repo_count}
                         </span>
                       </button>

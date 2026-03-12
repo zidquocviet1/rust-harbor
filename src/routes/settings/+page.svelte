@@ -17,6 +17,7 @@
     Binary,
     Zap
   } from "lucide-svelte";
+  import { APP_BRANDING } from "$lib/config/branding";
 
   let watchedFolders = $state<string[]>([]);
   let loading = $state(true);
@@ -54,7 +55,7 @@
         watchedFolders = [...watchedFolders, selected];
         await saveConfig();
         await invoke("refresh_repos");
-        toast.success("Folder Added", { description: "Harbor will now scan this directory." });
+        toast.success("Folder Added", { description: `${APP_BRANDING.shortName} will now scan this directory.` });
       } else {
         toast.info("Folder Exists", { description: "This directory is already being watched." });
       }
@@ -106,7 +107,7 @@
               <div class="space-y-1">
                 <CardTitle class="text-xl font-bold">Watched Folders</CardTitle>
                 <CardDescription class="text-sm">
-                  Harbor recursively scans these locations for Git repositories.
+                  {APP_BRANDING.shortName} recursively scans these locations for Git repositories.
                 </CardDescription>
               </div>
               <Button size="sm" onclick={addFolder} class="rounded-full bg-primary hover:scale-105 transition-transform px-4">
@@ -164,7 +165,7 @@
           <div class="space-y-1">
             <p class="text-sm font-bold text-amber-500">Privacy Notice</p>
             <p class="text-xs text-amber-200/60 leading-relaxed">
-              Harbor only communicates with your local Git binary. Your source code and repository data never leave your machine.
+              {APP_BRANDING.shortName} only communicates with your local Git binary. Your source code and repository data never leave your machine.
             </p>
           </div>
       </div>
