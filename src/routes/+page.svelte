@@ -761,8 +761,8 @@
       </CardContent>
     {:else}
       <!-- List Item -->
-      <div class="flex-1 flex items-center justify-between py-2.5 px-6 overflow-hidden gap-8">
-        <div class="flex items-center space-x-5 min-w-0 flex-1">
+      <div class="flex-1 flex items-center justify-between py-2.5 px-5 overflow-hidden gap-6">
+        <div class="flex items-center space-x-4 min-w-0 flex-1">
           <div class="p-2.5 bg-white/80 rounded-2xl text-muted-foreground group-hover:text-primary transition-all duration-500 group-hover:bg-primary/10">
             <GitBranch class="w-5 h-5" />
           </div>
@@ -818,19 +818,19 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-10 flex-shrink-0">
-          <div class="w-32 flex flex-col items-center">
+        <div class="flex items-center gap-6 flex-shrink-0">
+          <div class="w-24 flex flex-col items-center">
             <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Branch</span>
-            <span class="text-sm font-bold tracking-tight truncate max-w-[120px]">{repo.branch}</span>
+            <span class="text-sm font-bold tracking-tight truncate max-w-[88px]">{repo.branch}</span>
           </div>
-          <div class="w-32 flex flex-col items-center">
+          <div class="w-24 flex flex-col items-center">
             <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Status</span>
             <div class="flex items-center space-x-2">
               <status.icon class="w-4 h-4 {status.color}" />
               <span class="text-sm font-bold tracking-tight {status.color}">{status.label}</span>
             </div>
           </div>
-          <div class="w-32 flex flex-col items-center">
+          <div class="w-28 flex flex-col items-center">
             <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Activity</span>
             <span class="text-sm font-bold text-muted-foreground tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
           </div>
