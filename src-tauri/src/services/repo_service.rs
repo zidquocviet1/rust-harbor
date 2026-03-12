@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, Manager, Emitter};
 use crate::models::repo::{SyncStatus, RepoMetadata};
 use crate::controllers::repo::RepoCache;
+use crate::services::database::{DbPool, batch_fetch_repo_tags};
 use std::process::Command;
 
 pub fn get_repo_metadata(path: &Path) -> Option<RepoMetadata> {
@@ -74,7 +75,14 @@ pub fn get_repo_metadata(path: &Path) -> Option<RepoMetadata> {
 pub fn update_repo_cache(app: &AppHandle, path_str: &str) {
     let cache = app.state::<RepoCache>();
     let path = Path::new(path_str);
-    if let Some(metadata) = get_repo_metadata(path) {
+    if let Some(mut metadata) = get_repo_metadata(path) {
+        if let Ok(conn) = app.state::<DbPool>().0.lock() {
+            if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
+                if let Some(tags) = tag_map.get(path_str) {
+                    metadata.tags = tags.clone();
+                }
+            }
+        }
         cache.0.insert(path_str.to_string(), metadata);
         let _ = app.emit("repo-state-changed", ());
     }

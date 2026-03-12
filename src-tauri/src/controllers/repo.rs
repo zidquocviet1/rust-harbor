@@ -23,8 +23,25 @@ impl RepoCache {
 pub struct ScanStatus(pub AtomicBool);
 
 #[tauri::command]
-pub async fn list_repos(app: AppHandle, cache: tauri::State<'_, RepoCache>) -> Result<Vec<RepoMetadata>> {
+pub async fn list_repos(
+    app: AppHandle,
+    cache: tauri::State<'_, RepoCache>,
+    db: tauri::State<'_, DbPool>,
+) -> Result<Vec<RepoMetadata>> {
     let mut result: Vec<RepoMetadata> = cache.0.iter().map(|r| r.value().clone()).collect();
+
+    // Merge latest tag assignments from SQLite so navigation doesn't drop tags.
+    if let Ok(conn) = db.0.lock() {
+        if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
+            for repo in &mut result {
+                if let Some(tags) = tag_map.get(&repo.path) {
+                    repo.tags = tags.clone();
+                } else {
+                    repo.tags = vec![];
+                }
+            }
+        }
+    }
     
     // Sort by last modified descending
     result.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
