@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Rust Harbor",
+        "title": "",
         "width": 1400,
         "height": 900
       }

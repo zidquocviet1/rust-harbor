@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AlertCircle, Terminal, Download, RefreshCw } from "lucide-svelte";
   import { Button } from "$lib/components/ui/button";
+  import { APP_BRANDING } from "$lib/config/branding";
 </script>
 
 <div class="fixed inset-0 z-[200] flex items-center justify-center p-6 overflow-hidden">
@@ -23,7 +24,7 @@
         <div class="space-y-2">
           <h1 class="text-4xl font-black tracking-tighter text-glow text-destructive">Git Not Detected</h1>
           <p class="text-muted-foreground text-lg leading-relaxed max-w-sm mx-auto font-medium">
-            Harbor requires the <span class="text-foreground border-b border-muted-foreground/30">Git CLI</span> to communicate with your repositories.
+            {APP_BRANDING.shortName} requires the <span class="text-foreground border-b border-muted-foreground/30">Git CLI</span> to communicate with your repositories.
           </p>
         </div>
       </div>

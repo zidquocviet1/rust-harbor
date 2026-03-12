@@ -167,7 +167,8 @@
   let selectedRepoForPreview = $state<RepoMetadata | null>(null);
   let readmeContent = $state<{ html: string, raw: string }>({ html: "", raw: "" });
   let readmeLoading = $state(false);
-  let previewMode = $state<'markdown' | 'text' | 'unified'>('markdown');
+  let previewMode = $state<'markdown' | 'unified'>('markdown');
+  let previewRequestId = 0;
   let unlistenState: UnlistenFn;
   let unlistenStart: UnlistenFn;
   let unlistenEnd: UnlistenFn;
@@ -182,21 +183,30 @@
     selectedRepoForPreview = repo;
     readmeLoading = true;
     previewMode = 'markdown';
-    try {
-      // Backend now returns pre-parsed HTML and RAW content
-      const response = await invoke<{ html: string, raw: string }>("get_repo_readme", { path: repo.path });
-      readmeContent = response;
-      
-      // Wait for Svelte to render the HTML before highlighting
-      await tick();
-      highlightCode();
-    } catch (e) {
-      readmeContent = { 
-        html: "<h3>No README found</h3><p>This repository does not have a standard README file.</p>",
-        raw: "No README found" 
-      };
-    } finally {
-      readmeLoading = false;
+    const requestId = ++previewRequestId;
+    const load = async () => {
+      try {
+        // Backend now returns pre-parsed HTML and RAW content
+        const response = await invoke<{ html: string, raw: string }>("get_repo_readme", { path: repo.path });
+        if (requestId !== previewRequestId) return;
+        readmeContent = response;
+      } catch (e) {
+        if (requestId !== previewRequestId) return;
+        readmeContent = { 
+          html: "<h3>No README found</h3><p>This repository does not have a standard README file.</p>",
+          raw: "No README found" 
+        };
+      } finally {
+        if (requestId !== previewRequestId) return;
+        readmeLoading = false;
+        scheduleHighlight();
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(() => { void load(); });
+    } else {
+      setTimeout(() => { void load(); }, 0);
     }
   }
 
@@ -207,16 +217,49 @@
     });
   }
 
+  function scheduleHighlight() {
+    if (!readmeContent.html || previewMode !== 'markdown') return;
+    const run = () => tick().then(() => highlightCode());
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(run);
+    } else {
+      setTimeout(run, 0);
+    }
+  }
+
   // Also highlights when mode changes to markdown
   $effect(() => {
     if (previewMode === 'markdown' && readmeContent.html && !readmeLoading) {
-      tick().then(() => highlightCode());
+      scheduleHighlight();
     }
   });
 
   function closePreview() {
     selectedRepoForPreview = null;
     readmeContent = { html: "", raw: "" };
+    previewRequestId += 1;
+  }
+
+  function enhanceReadme(node: HTMLElement) {
+    const applyImageHints = () => {
+      const images = Array.from(node.querySelectorAll('img'));
+      images.forEach((img) => {
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.fetchPriority = 'low';
+        img.classList.add('readme-image');
+      });
+    };
+
+    applyImageHints();
+    const observer = new MutationObserver(() => applyImageHints());
+    observer.observe(node, { childList: true, subtree: true });
+
+    return {
+      destroy() {
+        observer.disconnect();
+      }
+    };
   }
 
   // Fuse.js for fuzzy search
@@ -607,13 +650,6 @@
         <div class="flex items-start justify-between gap-6">
           <div class="space-y-2 flex-1 min-w-0">
             <h3 class="text-2xl font-black tracking-tight truncate group-hover:text-primary transition-colors">{repo.name}</h3>
-            <button 
-              onclick={() => openFolder(repo.path)}
-              class="text-[10px] bg-white/80 border border-slate-200/70 hover:border-slate-300 px-2 py-0.5 rounded-full font-mono text-muted-foreground truncate max-w-full block hover:text-foreground transition-all"
-              title={repo.path}
-            >
-              {repo.path}
-            </button>
           </div>
           <div class="p-3 bg-white/80 rounded-2xl text-muted-foreground group-hover:text-primary group-hover:bg-primary/10 transition-all duration-500">
             <GitBranch class="w-5 h-5" />
@@ -658,7 +694,7 @@
           </div>
 
           <!-- Tag badges -->
-          <div class="flex flex-wrap gap-1.5 min-h-[20px]">
+          <div class="flex flex-wrap gap-1.5 min-h-[20px] mb-2">
             {#each repo.tags.slice(0, 3) as tagName}
               {@const match = $allTags.find(t => t.name === tagName)}
               <Badge
@@ -768,7 +804,7 @@
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center space-x-3 mb-0.5">
-              <h3 class="font-bold truncate text-sm tracking-tight">{repo.name}</h3>
+              <h3 class="font-bold truncate text-base tracking-tight">{repo.name}</h3>
               <div class="flex gap-1">
                 {#each Object.keys(repo.languages || {}).slice(0, 2) as lang}
                   {@const icon = getLanguageIcon(lang)}
@@ -784,14 +820,8 @@
               </div>
             </div>
             {#if repo.description}
-              <p class="text-[11px] text-muted-foreground font-medium truncate italic mt-1">{repo.description}</p>
+              <p class="text-[12px] text-muted-foreground font-medium truncate italic mt-1">{repo.description}</p>
             {/if}
-            <button 
-              onclick={() => openFolder(repo.path)}
-              class="text-[11px] text-muted-foreground font-mono truncate hover:text-primary transition-colors block text-left mt-1.5 w-full"
-            >
-              {repo.path}
-            </button>
             <!-- Inline tag badges -->
             {#if repo.tags.length}
               <div class="flex flex-wrap gap-1 mt-1">
@@ -821,18 +851,18 @@
         <div class="flex items-center gap-6 flex-shrink-0">
           <div class="w-24 flex flex-col items-center">
             <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Branch</span>
-            <span class="text-sm font-bold tracking-tight truncate max-w-[88px]">{repo.branch}</span>
+            <span class="text-[15px] font-bold tracking-tight truncate max-w-[88px]">{repo.branch}</span>
           </div>
           <div class="w-24 flex flex-col items-center">
             <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Status</span>
             <div class="flex items-center space-x-2">
               <status.icon class="w-4 h-4 {status.color}" />
-              <span class="text-sm font-bold tracking-tight {status.color}">{status.label}</span>
+              <span class="text-[15px] font-bold tracking-tight {status.color}">{status.label}</span>
             </div>
           </div>
           <div class="w-28 flex flex-col items-center">
             <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Activity</span>
-            <span class="text-sm font-bold text-muted-foreground tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
+            <span class="text-[15px] font-bold text-muted-foreground tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
           </div>
         </div>
 
@@ -1143,7 +1173,8 @@
         {#each $allTags as tag}
           {@const checked = repoHasTag(tagPopoverRepo, tag)}
           <button
-            class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] hover:bg-slate-100 border border-transparent"
+            class="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] hover:bg-slate-100 border border-transparent {checked ? 'text-foreground' : ''}"
+            style={checked ? `background-color: ${tag.color}22` : ''}
             onclick={() => tagPopoverRepo && toggleTagForRepo(tagPopoverRepo, tag)}
           >
             <div class="flex items-center gap-2 min-w-0">
@@ -1176,7 +1207,6 @@
     <div class="p-6 border-b border-slate-200/70 flex items-center justify-between bg-white/80">
       <div class="space-y-1">
         <h2 class="text-xl font-black uppercase tracking-widest">{selectedRepoForPreview.name}</h2>
-        <p class="text-[10px] text-muted-foreground font-mono">{selectedRepoForPreview.path}</p>
       </div>
       <Button variant="ghost" size="icon" class="rounded-xl hover:bg-slate-100" onclick={closePreview}>
         <X class="w-5 h-5" />
@@ -1191,12 +1221,6 @@
           class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'markdown' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
         >
           Markdown
-        </button>
-        <button 
-          onclick={() => previewMode = 'text'}
-          class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'text' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
-        >
-          Raw
         </button>
         <button 
           onclick={() => previewMode = 'unified'}
@@ -1230,13 +1254,9 @@
         </div>
       {:else}
         {#if previewMode === 'markdown'}
-          <div class="animate-in fade-in slide-in-from-bottom-4 duration-1000">
+          <div class="animate-in fade-in slide-in-from-bottom-4 duration-1000" use:enhanceReadme>
             {@html readmeContent.html}
           </div>
-        {:else if previewMode === 'text'}
-          <pre class="bg-white/85 p-10 rounded-[2.5rem] border border-slate-200/80 font-mono text-[15px] leading-relaxed text-muted-foreground whitespace-pre-wrap animate-in fade-in duration-500 shadow-2xl overflow-x-auto">
-            {readmeContent.raw}
-          </pre>
         {:else}
           <div class="space-y-10 animate-in fade-in duration-500 pb-20">
             <div class="space-y-4">
@@ -1291,13 +1311,47 @@
                  </div>
               </div>
             {/if}
+
+            <div class="space-y-4">
+               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Tags</h3>
+               <div class="flex flex-wrap gap-2">
+                 {#if selectedRepoForPreview.tags?.length}
+                   {#each selectedRepoForPreview.tags as tagName}
+                     {@const match = $allTags.find(t => t.name === tagName)}
+                     <span
+                       class="inline-flex items-center gap-2 text-[10px] px-3 py-1 rounded-full bg-white/90 border border-slate-200/80 font-semibold text-muted-foreground"
+                       style={`border-color: ${match?.color ?? '#6366f1'}55`}
+                     >
+                       <span
+                         class="w-2 h-2 rounded-full"
+                         style={`background: ${match?.color ?? '#6366f1'}`}
+                       ></span>
+                       {tagName}
+                     </span>
+                   {/each}
+                 {:else}
+                   <span class="text-xs text-muted-foreground">No tags assigned</span>
+                 {/if}
+               </div>
+            </div>
             
             <div class="space-y-4">
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Remote Link</h3>
                <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
                  <div class="flex items-center gap-3">
                     <Globe class="w-4 h-4 text-muted-foreground" />
-                    <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">{selectedRepoForPreview.remote_url || 'No Remote Configured'}</span>
+                    {#if selectedRepoForPreview.remote_url}
+                      <a
+                        href={selectedRepoForPreview.remote_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-xs font-mono text-primary truncate max-w-xs hover:underline underline-offset-4"
+                      >
+                        {selectedRepoForPreview.remote_url}
+                      </a>
+                    {:else}
+                      <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">No Remote Configured</span>
+                    {/if}
                  </div>
                  {#if selectedRepoForPreview.remote_url}
                     <Badge variant="outline" class="{selectedRepoForPreview.remote_reachable ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'} border-transparent">
