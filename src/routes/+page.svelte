@@ -177,7 +177,25 @@
   let tagPopoverPosition = $state<{ top: number; left: number } | null>(null);
   let groupByMode = $state<'none' | 'language'>('none');
   let collapsedGroups = $state<Set<string>>(new Set());
+  let groupVisibility = $state<Record<string, boolean>>({});
+  let groupObserver: IntersectionObserver | null = null;
+  let viewportWidth = $state(0);
   let appConfig = $state<{ watched_folders: string[]; group_by_mode?: string | null } | null>(null);
+
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+  }
 
   async function openPreview(repo: RepoMetadata) {
     selectedRepoForPreview = repo;
@@ -292,6 +310,42 @@
       .map(([lang, count]) => ({ name: lang, count }));
   });
 
+  type RepoLanguageInfo = {
+    primaryLanguage: string;
+    sortedLanguages: Array<[string, number]>;
+    languageCount: number;
+  };
+
+  const DEFAULT_LANGUAGE_INFO: RepoLanguageInfo = {
+    primaryLanguage: "Other",
+    sortedLanguages: [],
+    languageCount: 0
+  };
+
+  const repoLanguageInfo = $derived.by(() => {
+    const map = new Map<string, RepoLanguageInfo>();
+    for (const repo of repos) {
+      const entries = Object.entries(repo.languages || {});
+      entries.sort((a, b) => {
+        const diff = b[1] - a[1];
+        if (diff !== 0) return diff;
+        return a[0].localeCompare(b[0]);
+      });
+      const primaryLanguage = entries.length > 0 ? entries[0][0] : "Other";
+      map.set(repo.path, {
+        primaryLanguage,
+        sortedLanguages: entries,
+        languageCount: entries.length
+      });
+    }
+    return map;
+  });
+
+  function getRepoLanguageInfo(repo: RepoMetadata | null | undefined): RepoLanguageInfo {
+    if (!repo) return DEFAULT_LANGUAGE_INFO;
+    return repoLanguageInfo.get(repo.path) ?? DEFAULT_LANGUAGE_INFO;
+  }
+
   let languageFilterEl: HTMLDivElement | null = null;
   let languageMeasureEl: HTMLDivElement | null = null;
   let languageVisibleCount = $state(7);
@@ -375,6 +429,16 @@
     scheduleLanguageRecalc();
   });
 
+  onMount(() => {
+    if (typeof window === "undefined") return;
+    viewportWidth = window.innerWidth;
+    const handleResize = () => {
+      viewportWidth = window.innerWidth;
+    };
+    window.addEventListener("resize", handleResize, { passive: true });
+    return () => window.removeEventListener("resize", handleResize);
+  });
+
   const visibleLanguages = $derived(langStats.slice(0, languageVisibleCount));
   const hiddenLanguages = $derived(langStats.slice(languageVisibleCount));
 
@@ -404,14 +468,7 @@
     const groups: Record<string, RepoMetadata[]> = {};
 
     for (const repo of filteredRepos) {
-      const entries = Object.entries(repo.languages || {});
-      let key = "Other";
-      if (entries.length > 0) {
-        entries.sort((a, b) => b[1] - a[1]);
-        const topCount = entries[0][1];
-        const tied = entries.filter(([_, c]) => c === topCount).map(([lang]) => lang).sort();
-        key = tied[0];
-      }
+      const key = getRepoLanguageInfo(repo).primaryLanguage;
       if (!groups[key]) groups[key] = [];
       groups[key].push(repo);
     }
@@ -425,6 +482,52 @@
     }
     return result;
   });
+
+  const gridColumns = $derived(() => {
+    if (viewportWidth >= 1024) return 3;
+    if (viewportWidth >= 768) return 2;
+    return 1;
+  });
+
+  const LIST_ITEM_HEIGHT = 120;
+  const LIST_GAP = 12;
+  const GRID_ROW_HEIGHT = 360;
+  const GRID_GAP = 24;
+
+  function estimateGroupHeight(repoCount: number) {
+    const rows = viewMode === 'grid'
+      ? Math.max(1, Math.ceil(repoCount / gridColumns))
+      : Math.max(1, repoCount);
+    const rowHeight = viewMode === 'grid' ? GRID_ROW_HEIGHT : LIST_ITEM_HEIGHT;
+    const gap = viewMode === 'grid' ? GRID_GAP : LIST_GAP;
+    return rows * rowHeight + Math.max(0, rows - 1) * gap;
+  }
+
+  function observeGroup(node: HTMLElement, label: string) {
+    if (typeof window === "undefined") return;
+    if (!groupObserver) {
+      groupObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            const target = entry.target as HTMLElement;
+            const key = target.dataset.groupLabel;
+            if (!key) continue;
+            if (entry.isIntersecting) {
+              groupVisibility = { ...groupVisibility, [key]: true };
+            }
+          }
+        },
+        { rootMargin: "800px 0px 800px 0px", threshold: 0.01 }
+      );
+    }
+    node.dataset.groupLabel = label;
+    groupObserver.observe(node);
+    return {
+      destroy() {
+        groupObserver?.unobserve(node);
+      }
+    };
+  }
 
   // Keep repo tag badges in sync when a tag is deleted or renamed globally.
   $effect(() => {
@@ -455,10 +558,6 @@
     }
   }
 
-  function getSortedLanguageEntries(languages: Record<string, number> | undefined) {
-    return Object.entries(languages || {}).sort((a, b) => b[1] - a[1]) as Array<[string, number]>;
-  }
-
   function formatRelativeTime(timestamp: number) {
     if (timestamp === 0) return "Never";
     const now = Math.floor(Date.now() / 1000);
@@ -482,11 +581,10 @@
 
   async function loadRepos() {
     try {
-      repos = await invoke("list_repos");
+      repos = await withTimeout(invoke("list_repos"), 15000, "list_repos");
     } catch (e) {
       console.error("Failed to load repos:", e);
-    } finally {
-      loading = false;
+      toast.error("Failed to load repositories");
     }
   }
 
@@ -537,18 +635,31 @@
   }
 
   onMount(async () => {
-    await loadRepos();
-    await loadTags();
+    loading = true;
+    const configPromise = withTimeout(invoke<any>("get_config"), 8000, "get_config")
+      .then((config) => {
+        appConfig = config;
+        if (config?.group_by_mode === "language") {
+          groupByMode = 'language';
+        }
+      })
+      .catch((e) => {
+        console.error("Failed to load config:", e);
+      });
+
+    const loadTagsPromise = withTimeout(loadTags(), 8000, "load_tags").catch((e) => {
+      console.error("Failed to load tags:", e);
+    });
+
+    await Promise.allSettled([loadRepos(), loadTagsPromise, configPromise]);
+    loading = false;
+
     try {
-      const config = await invoke<any>("get_config");
-      appConfig = config;
-      if (config?.group_by_mode === "language") {
-        groupByMode = 'language';
-      }
+      isScanning = await withTimeout(invoke("is_scanning"), 4000, "is_scanning");
     } catch (e) {
-      console.error("Failed to load config:", e);
+      console.error("Failed to read scanning state:", e);
+      isScanning = false;
     }
-    isScanning = await invoke("is_scanning");
     unlistenState = await listen("repo-state-changed", () => loadRepos());
     unlistenStart = await listen("scan-started", () => {
       isScanning = true;
@@ -563,6 +674,8 @@
     if (unlistenState) unlistenState();
     if (unlistenStart) unlistenStart();
     if (unlistenEnd) unlistenEnd();
+    groupObserver?.disconnect();
+    groupObserver = null;
   });
 
   async function setGroupByMode(mode: 'none' | 'language') {
@@ -583,11 +696,32 @@
     const next = new Set(collapsedGroups);
     if (next.has(label)) {
       next.delete(label);
+      groupVisibility = { ...groupVisibility, [label]: true };
     } else {
       next.add(label);
     }
     collapsedGroups = next;
   }
+
+  $effect(() => {
+    if (groupByMode !== 'language') {
+      if (Object.keys(groupVisibility).length > 0) {
+        groupVisibility = {};
+      }
+      return;
+    }
+    const labels = Object.keys(groupedRepos);
+    const prev = groupVisibility;
+    const next: Record<string, boolean> = {};
+    let changed = labels.length !== Object.keys(prev).length;
+    for (const label of labels) {
+      next[label] = prev[label] ?? false;
+      if (next[label] !== prev[label]) changed = true;
+    }
+    if (changed) {
+      groupVisibility = next;
+    }
+  });
 
   function openTagPopover(repo: RepoMetadata, anchorEl: HTMLElement) {
     tagPopoverRepo = repo;
@@ -652,11 +786,15 @@
 )}
   <Card 
     class="group glass glass-hover border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
+    style={viewMode === 'grid'
+      ? "content-visibility: auto; contain-intrinsic-size: 360px 320px;"
+      : "content-visibility: auto; contain-intrinsic-size: 120px 96px;"}
     onclick={(e) => {
       if ((e.target as HTMLElement).closest('button')) return;
       openPreview(repo);
     }}
   >
+    {@const langInfo = getRepoLanguageInfo(repo)}
     {#if viewMode === 'grid'}
       <CardContent class="p-8 space-y-8 flex-1 flex flex-col">
         <div class="flex items-start justify-between gap-6">
@@ -687,7 +825,7 @@
 
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap gap-1.5 min-h-[24px]">
-            {#each getSortedLanguageEntries(repo.languages).slice(0, 3) as [lang, count]}
+            {#each langInfo.sortedLanguages.slice(0, 3) as [lang, count]}
             {@const icon = getLanguageIcon(lang)}
             <Badge variant="outline" class="bg-white/80 border-slate-200/70 text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-widest text-muted-foreground">
               {#if icon}
@@ -698,9 +836,9 @@
               {lang}
             </Badge>
           {/each}
-            {#if Object.keys(repo.languages || {}).length > 3}
+            {#if langInfo.languageCount > 3}
               <Badge variant="outline" class="bg-white/80 border-slate-200/70 text-[8px] px-2 py-0.5 rounded-md font-black">
-                +{Object.keys(repo.languages).length - 3}
+                +{langInfo.languageCount - 3}
               </Badge>
             {/if}
           </div>
@@ -818,7 +956,7 @@
             <div class="flex items-center space-x-3 mb-0.5">
               <h3 class="font-bold truncate text-base tracking-tight">{repo.name}</h3>
               <div class="flex gap-1">
-                {#each Object.keys(repo.languages || {}).slice(0, 2) as lang}
+                {#each langInfo.sortedLanguages.slice(0, 2) as [lang]}
                   {@const icon = getLanguageIcon(lang)}
                   <span class="inline-flex items-center text-[8px] px-1.5 py-0.5 bg-white/80 border border-slate-200/70 text-muted-foreground font-black uppercase tracking-widest rounded-md">
                     {#if icon}
@@ -1125,21 +1263,27 @@
     {#if groupByMode === 'language'}
       <div class="space-y-6">
         {#each Object.entries(groupedRepos) as [label, group]}
-          <GroupHeader
-            label={label}
-            count={group.length}
-            collapsed={collapsedGroups.has(label)}
-            onToggle={() => toggleGroupCollapse(label)}
-          >
-            {#snippet children()}
-              <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-3" : "space-y-3 mt-3"}>
-                {#each group as repo (repo.path)}
-                  {@const status = getSyncStatusDetails(repo.sync_status)}
-                  {@render RepoCard({ repo, status })}
-                {/each}
-              </div>
-            {/snippet}
-          </GroupHeader>
+          <div use:observeGroup={label}>
+            <GroupHeader
+              label={label}
+              count={group.length}
+              collapsed={collapsedGroups.has(label)}
+              onToggle={() => toggleGroupCollapse(label)}
+            >
+              {#snippet children()}
+                {#if groupVisibility[label]}
+                  <div class={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-3" : "space-y-3 mt-3"}>
+                    {#each group as repo (repo.path)}
+                      {@const status = getSyncStatusDetails(repo.sync_status)}
+                      {@render RepoCard({ repo, status })}
+                    {/each}
+                  </div>
+                {:else}
+                  <div style={`height: ${estimateGroupHeight(group.length)}px;`}></div>
+                {/if}
+              {/snippet}
+            </GroupHeader>
+          </div>
         {/each}
       </div>
     {:else}
@@ -1298,7 +1442,7 @@
             <div class="space-y-4">
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Manifested Artifacts</h3>
                <div class="flex flex-wrap gap-2.5">
-                 {#each getSortedLanguageEntries(selectedRepoForPreview.languages) as [lang, count]}
+                 {#each getRepoLanguageInfo(selectedRepoForPreview).sortedLanguages as [lang, count]}
                    {@const icon = getLanguageIcon(lang)}
                    <div class="bg-white/90 px-5 py-3 rounded-2xl border border-slate-200/70 flex items-center gap-4 hover:border-primary/20 transition-colors">
                      {#if icon}
