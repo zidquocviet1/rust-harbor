@@ -1334,6 +1334,16 @@
                  {/if}
                </div>
             </div>
+
+            <div class="space-y-4">
+               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Local Directory</h3>
+               <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
+                 <div class="flex items-center gap-3 min-w-0">
+                   <FolderOpen class="w-4 h-4 text-muted-foreground" />
+                   <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">{selectedRepoForPreview.path}</span>
+                 </div>
+               </div>
+            </div>
             
             <div class="space-y-4">
                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Remote Link</h3>
