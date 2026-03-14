@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { Card, CardContent } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -251,12 +251,24 @@
       });
     };
 
+    const handleLinkClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest("a") as HTMLAnchorElement | null;
+      if (!anchor || !anchor.href) return;
+      if (!anchor.href.startsWith("http")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void openUrl(anchor.href);
+    };
+
     applyImageHints();
     const observer = new MutationObserver(() => applyImageHints());
     observer.observe(node, { childList: true, subtree: true });
+    node.addEventListener("click", handleLinkClick);
 
     return {
       destroy() {
+        node.removeEventListener("click", handleLinkClick);
         observer.disconnect();
       }
     };
