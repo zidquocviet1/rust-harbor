@@ -80,7 +80,7 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
         let result = (|| -> Result<()> {
             let config = load_config(&app_clone)?;
             let cache = app_clone.state::<RepoCache>();
-            let repos_paths = scan_for_repos(&config.watched_folders);
+            let repos_paths = scan_for_repos(&config);
             
             // Update the watcher
             let watcher_state = app_clone.state::<WatcherState>();
@@ -89,8 +89,9 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
             }
 
             // Parallel processing with Rayon for repos
+            let git_path_ref = &config.git_path;
             let mut processed_repos: Vec<RepoMetadata> = repos_paths.par_iter().filter_map(|path| {
-                get_repo_metadata(path)
+                get_repo_metadata(path, git_path_ref)
             }).collect();
 
             // Batch-fetch tags from SQLite and merge into metadata
@@ -171,27 +172,30 @@ pub async fn get_repo_readme(path: String) -> Result<ReadmeResponse> {
 
 #[tauri::command]
 pub async fn git_fetch(app: AppHandle, path: String) -> Result<String> {
-    let result = execute_git_command(path.clone(), &["fetch", "origin"])?;
+    let config = load_config(&app)?;
+    let result = execute_git_command(path.clone(), &["fetch", "origin"], &config.git_path)?;
     update_repo_cache(&app, &path);
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn git_pull(app: AppHandle, path: String) -> Result<String> {
-    let result = execute_git_command(path.clone(), &["pull", "origin", "HEAD"])?;
+    let config = load_config(&app)?;
+    let result = execute_git_command(path.clone(), &["pull", "origin", "HEAD"], &config.git_path)?;
     update_repo_cache(&app, &path);
     Ok(result)
 }
 
 #[tauri::command]
 pub async fn git_push(app: AppHandle, path: String) -> Result<String> {
-    let result = execute_git_command(path.clone(), &["push"])?;
+    let config = load_config(&app)?;
+    let result = execute_git_command(path.clone(), &["push"], &config.git_path)?;
     update_repo_cache(&app, &path);
     Ok(result)
 }
 
-fn execute_git_command(path: String, args: &[&str]) -> Result<String> {
-    let output = std::process::Command::new("git")
+fn execute_git_command(path: String, args: &[&str], git_path: &str) -> Result<String> {
+    let output = std::process::Command::new(git_path)
         .args(args)
         .current_dir(path)
         .output()

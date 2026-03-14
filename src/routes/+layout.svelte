@@ -20,9 +20,11 @@
     deleteTag,
     type Tag
   } from '$lib/stores/tagStore';
-
+  import { listen } from '@tauri-apps/api/event';
+  
   let { children }: { children: Snippet } = $props();
   let gitInstalled = $state(true);
+  let currentGitPath = $state("git");
   let checking = $state(true);
   let tagsCollapsed = $state(false);
   let creatingTag = $state(false);
@@ -36,16 +38,30 @@
   let showDeleteDialog = $state(false);
   let tagSearch = $state("");
 
-  onMount(async () => {
+  async function checkGit() {
     try {
+      const config = await invoke<any>('get_config');
+      currentGitPath = config.git_path;
       gitInstalled = await invoke('is_git_installed');
-      await loadTags();
     } catch (e) {
       console.error('Failed to check git:', e);
       gitInstalled = false;
     } finally {
       checking = false;
     }
+  }
+
+  onMount(async () => {
+    await checkGit();
+    await loadTags();
+
+    const unlisten = await listen('config-changed', () => {
+      checkGit();
+    });
+
+    return () => {
+      unlisten();
+    };
   });
 
   const PALETTE = [
@@ -153,7 +169,7 @@
       </div>
     </div>
   {:else if !gitInstalled}
-    <GitMissingError />
+    <GitMissingError currentPath={currentGitPath} />
   {:else}
     <div class="flex min-h-screen">
       <!-- Sidebar -->
@@ -181,7 +197,7 @@
             class="sidebar-item flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group {page.url.pathname === '/settings' ? 'bg-primary/12 text-primary border border-primary/30 shadow-sm shadow-primary/20' : 'hover:bg-slate-100/80 text-muted-foreground border border-transparent hover:border-slate-200/80'}"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-folder-cog group-hover:text-primary transition-colors"><path d="M10.5 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v3.3"/><circle cx="18" cy="18" r="3"/><path d="M18 14v1"/><path d="M18 21v1"/><path d="M22 18h-1"/><path d="M15 18h-1"/><path d="M21 15l-.7.7"/><path d="M15.7 20.3l-.7.7"/><path d="M21 21l-.7-.7"/><path d="M15.7 15.7l-.7-.7"/></svg>
-            <span class="font-medium">Watched Folders</span>
+            <span class="font-medium">Settings</span>
           </a>
 
           <!-- Tags Section -->
