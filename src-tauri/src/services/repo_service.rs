@@ -7,7 +7,7 @@ use crate::controllers::repo::RepoCache;
 use crate::services::database::{DbPool, batch_fetch_repo_tags};
 use std::process::Command;
 
-pub fn get_repo_metadata(path: &Path) -> Option<RepoMetadata> {
+pub fn get_repo_metadata(path: &Path, git_path: &str) -> Option<RepoMetadata> {
     let repo = Repository::open(path).ok()?;
     let name = path.file_name()?.to_string_lossy().to_string();
     let path_str = path.to_string_lossy().to_string();
@@ -53,7 +53,7 @@ pub fn get_repo_metadata(path: &Path) -> Option<RepoMetadata> {
         .and_then(|r| r.url().map(|u| u.to_string()));
     
     let remote_reachable = if remote_url.is_some() {
-        verify_remote_connectivity(&path_str)
+        verify_remote_connectivity(&path_str, git_path)
     } else {
         false
     };
@@ -75,7 +75,12 @@ pub fn get_repo_metadata(path: &Path) -> Option<RepoMetadata> {
 pub fn update_repo_cache(app: &AppHandle, path_str: &str) {
     let cache = app.state::<RepoCache>();
     let path = Path::new(path_str);
-    if let Some(mut metadata) = get_repo_metadata(path) {
+    
+    let git_path = crate::config::load_config(app)
+        .map(|c| c.git_path)
+        .unwrap_or_else(|_| "git".to_string());
+
+    if let Some(mut metadata) = get_repo_metadata(path, &git_path) {
         if let Ok(conn) = app.state::<DbPool>().0.lock() {
             if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
                 if let Some(tags) = tag_map.get(path_str) {
@@ -88,8 +93,8 @@ pub fn update_repo_cache(app: &AppHandle, path_str: &str) {
     }
 }
 
-pub fn verify_remote_connectivity(path: &str) -> bool {
-    let output = Command::new("git")
+pub fn verify_remote_connectivity(path: &str, git_path: &str) -> bool {
+    let output = Command::new(git_path)
         .args(&["ls-remote", "--exit-code", "--heads", "origin"])
         .current_dir(path)
         .output();

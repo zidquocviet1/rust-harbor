@@ -12,8 +12,12 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 #[tauri::command]
-fn is_git_installed() -> bool {
-    std::process::Command::new("git")
+fn is_git_installed(app: tauri::AppHandle) -> bool {
+    let git_path = crate::config::load_config(&app)
+        .map(|c| c.git_path)
+        .unwrap_or_else(|_| "git".to_string());
+
+    std::process::Command::new(git_path)
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -48,6 +52,8 @@ pub fn run() {
             repo::git_push,
             settings::get_config,
             settings::set_config,
+            settings::get_workspace_insights,
+            settings::verify_git_path,
             tags::list_tags,
             tags::create_tag,
             tags::rename_tag,
