@@ -42,9 +42,7 @@
 </div>
 
 <style>
-  :global(.glass) {
-    background: rgba(255, 255, 255, 0.02);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+  .settings-container {
+    display: block;
   }
 </style>
