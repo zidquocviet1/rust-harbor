@@ -53,6 +53,23 @@ pub fn init_database(app_handle: &tauri::AppHandle) -> crate::error::Result<DbPo
     )
     .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
 
+    // Create repositories table for caching
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS repositories (
+            path             TEXT    PRIMARY KEY,
+            name             TEXT    NOT NULL,
+            description      TEXT,
+            branch           TEXT    NOT NULL,
+            sync_status      TEXT    NOT NULL,
+            remote_url       TEXT,
+            remote_reachable INTEGER NOT NULL,
+            last_modified    INTEGER NOT NULL,
+            languages        TEXT    NOT NULL -- JSON string
+        )",
+        [],
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
     // Ensure foreign keys are enforced
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
@@ -110,6 +127,95 @@ pub fn batch_fetch_repo_tags(conn: &Connection) -> crate::error::Result<std::col
     }
 
     Ok(map)
+}
+
+/// Saves a batch of repositories to the database, replacing any existing ones with the same path.
+pub fn save_repositories(conn: &Connection, repos: &[crate::models::repo::RepoMetadata]) -> crate::error::Result<()> {
+    let mut stmt = conn
+        .prepare(
+            "INSERT OR REPLACE INTO repositories (
+                path, name, description, branch, sync_status, 
+                remote_url, remote_reachable, last_modified, languages
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    for repo in repos {
+        let sync_status = serde_json::to_string(&repo.sync_status).unwrap_or_else(|_| "\"Clean\"".to_string());
+        let languages = serde_json::to_string(&repo.languages).unwrap_or_else(|_| "{}".to_string());
+        
+        stmt.execute(rusqlite::params![
+            repo.path,
+            repo.name,
+            repo.description,
+            repo.branch,
+            sync_status.trim_matches('"'), // Store as plain string
+            repo.remote_url,
+            if repo.remote_reachable { 1 } else { 0 },
+            repo.last_modified,
+            languages
+        ])
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    }
+
+    Ok(())
+}
+
+/// Loads all cached repositories from the database.
+pub fn load_repositories(conn: &Connection) -> crate::error::Result<Vec<crate::models::repo::RepoMetadata>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT path, name, description, branch, sync_status, 
+                    remote_url, remote_reachable, last_modified, languages 
+             FROM repositories",
+        )
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let sync_status_str: String = row.get(4)?;
+            let languages_str: String = row.get(8)?;
+            
+            // Map string back to SyncStatus enum
+            let sync_status = match sync_status_str.as_str() {
+                "Ahead" => crate::models::repo::SyncStatus::Ahead,
+                "Dirty" => crate::models::repo::SyncStatus::Dirty,
+                "Behind" => crate::models::repo::SyncStatus::Behind,
+                "Diverged" => crate::models::repo::SyncStatus::Diverged,
+                _ => crate::models::repo::SyncStatus::Clean,
+            };
+
+            let languages: std::collections::HashMap<String, usize> = serde_json::from_str(&languages_str)
+                .unwrap_or_default();
+
+            Ok(crate::models::repo::RepoMetadata {
+                path: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                branch: row.get(3)?,
+                sync_status,
+                remote_url: row.get(5)?,
+                remote_reachable: row.get::<_, i32>(6)? != 0,
+                last_modified: row.get(7)?,
+                languages,
+                tags: vec![],
+            })
+        })
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let mut repos = Vec::new();
+    for row in rows {
+        repos.push(row.map_err(|e| crate::error::Error::DbError(e.to_string()))?);
+    }
+
+    Ok(repos)
+}
+
+/// Clears all repositories from the cache table.
+pub fn clear_repositories(conn: &Connection) -> crate::error::Result<()> {
+    conn.execute("DELETE FROM repositories", [])
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    Ok(())
 }
 
 #[cfg(test)]

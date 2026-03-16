@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::services::scanner::scan_for_repos;
 use crate::services::watcher::WatcherState;
 use crate::services::repo_service::{get_repo_metadata, update_repo_cache};
-use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags};
+use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags, load_repositories, save_repositories, clear_repositories};
 use crate::models::repo::RepoMetadata;
 use tauri::{AppHandle, Manager, Emitter};
 use serde::Serialize;
@@ -28,9 +28,20 @@ pub async fn list_repos(
     cache: tauri::State<'_, RepoCache>,
     db: tauri::State<'_, DbPool>,
 ) -> Result<Vec<RepoMetadata>> {
+    // 1. If cache is empty, try loading from SQLite first
+    if cache.0.is_empty() {
+        if let Ok(conn) = db.0.lock() {
+            if let Ok(db_repos) = load_repositories(&conn) {
+                for repo in db_repos {
+                    cache.0.insert(repo.path.clone(), repo);
+                }
+            }
+        }
+    }
+
     let mut result: Vec<RepoMetadata> = cache.0.iter().map(|r| r.value().clone()).collect();
 
-    // Merge latest tag assignments from SQLite so navigation doesn't drop tags.
+    // 2. Merge latest tag assignments from SQLite
     if let Ok(conn) = db.0.lock() {
         if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
             for repo in &mut result {
@@ -46,7 +57,7 @@ pub async fn list_repos(
     // Sort by last modified descending
     result.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     
-    // If cache is empty, trigger an initial refresh in background
+    // 3. If STILL empty (first run), trigger a scan
     if result.is_empty() {
         let app_clone = app.clone();
         tokio::spawn(async move {
@@ -111,8 +122,12 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
                 let _ = cleanup_orphaned_tags(&conn, &valid_paths);
             }
 
-            // Update global cache
             cache.0.clear();
+            if let Ok(conn) = db.0.lock() {
+                let _ = clear_repositories(&conn);
+                let _ = save_repositories(&conn, &processed_repos);
+            }
+
             for repo in processed_repos {
                 cache.0.insert(repo.path.clone(), repo);
             }
