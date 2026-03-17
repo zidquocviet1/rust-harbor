@@ -801,15 +801,26 @@
   function openTagPopover(repo: RepoMetadata, anchorEl: HTMLElement) {
     tagPopoverRepo = repo;
     const rect = anchorEl.getBoundingClientRect();
-    const popoverWidth = 288; // w-72
-    const gap = 10;
-    const viewportPadding = 12;
+    const popoverWidth = 288;  // w-72
+    const popoverHeight = 340; // approximate max (header + scrollable list)
+    const gap = 8;
+    const padding = 12;
 
+    // Horizontal: right-align with button, clamped to viewport edges
     const left = Math.min(
-      Math.max(rect.right - popoverWidth, viewportPadding),
-      window.innerWidth - popoverWidth - viewportPadding
+      Math.max(rect.right - popoverWidth, padding),
+      window.innerWidth - popoverWidth - padding
     );
-    const top = Math.max(rect.top - gap, viewportPadding);
+
+    // Vertical: prefer above the button; flip below when there isn't enough room
+    let top: number;
+    if (rect.top - gap - popoverHeight >= padding) {
+      top = rect.top - gap - popoverHeight;
+    } else {
+      top = rect.bottom + gap;
+    }
+    // Final clamp so it never bleeds off either edge
+    top = Math.min(Math.max(top, padding), window.innerHeight - popoverHeight - padding);
 
     tagPopoverPosition = { top, left };
     tagPopoverOpen = true;
@@ -1372,7 +1383,7 @@
   ></button>
   <div
     class="fixed w-72 bg-background/95 border border-slate-200/80 rounded-2xl shadow-2xl z-[81] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-200"
-    style={`top: ${tagPopoverPosition.top}px; left: ${tagPopoverPosition.left}px; transform: translateY(-100%);`}
+    style={`top: ${tagPopoverPosition.top}px; left: ${tagPopoverPosition.left}px;`}
     use:clickOutside={closeTagPopover}
   >
     <div class="flex items-center justify-between mb-1">
