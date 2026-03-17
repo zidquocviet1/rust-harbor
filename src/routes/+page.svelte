@@ -39,6 +39,7 @@
   import 'highlight.js/styles/github-dark.css';
   import GroupHeader from "$lib/components/custom/GroupHeader.svelte";
   import OpenInEditor from "$lib/components/custom/OpenInEditor.svelte";
+  import * as si from "simple-icons";
   import type { SimpleIcon } from "simple-icons";
   import {
     siC,
@@ -622,10 +623,32 @@
     }
   }
 
+  function getEditorIcon(iconName: string): string | null {
+    const key = `si${iconName.charAt(0).toUpperCase()}${iconName.slice(1).toLowerCase()}` as keyof typeof si;
+    const icon = si[key] as SimpleIcon | undefined;
+    return icon ? icon.svg : null;
+  }
+
   function handleRepoContextMenu(event: MouseEvent, repo: RepoMetadata) {
     event.preventDefault();
     repoContextMenuRepo = repo;
-    repoContextMenuPosition = { x: event.clientX, y: event.clientY };
+
+    // Approximate menu height: header + finder + divider + editor-header + editors(max 180) + divider + git-fetch
+    const menuHeight = 360;
+    const menuWidth = 224; // w-56
+    const padding = 8;
+
+    let x = event.clientX;
+    let y = event.clientY;
+
+    if (y + menuHeight > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - menuHeight - padding);
+    }
+    if (x + menuWidth > window.innerWidth - padding) {
+      x = Math.max(padding, window.innerWidth - menuWidth - padding);
+    }
+
+    repoContextMenuPosition = { x, y };
   }
 
   function closeRepoContextMenu() {
@@ -1633,20 +1656,26 @@
     <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
       Open In Editor
     </div>
-    
-    {#each installedEditors as editor}
-      <button
-        class="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-primary/5 text-left transition-colors group"
-        onclick={() => repoContextMenuRepo && openInEditor(editor.id, repoContextMenuRepo.path)}
-      >
-        <div class="w-4 h-4 flex items-center justify-center">
-           <Code2 class="w-3.5 h-3.5 text-slate-400 group-hover:text-primary" />
-        </div>
-        <span class="font-medium text-slate-700 group-hover:text-primary">{editor.name}</span>
-      </button>
-    {:else}
-      <div class="px-3 py-2 text-slate-400 italic">No editors detected</div>
-    {/each}
+
+    <div class="overflow-y-auto max-h-[180px] overscroll-contain [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+      {#each installedEditors as editor}
+        <button
+          class="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-primary/5 text-left transition-colors group"
+          onclick={() => repoContextMenuRepo && openInEditor(editor.id, repoContextMenuRepo.path)}
+        >
+          <div class="w-4 h-4 flex items-center justify-center opacity-50 group-hover:opacity-100 shrink-0">
+            {#if getEditorIcon(editor.icon)}
+              <div class="w-3.5 h-3.5 fill-current">{@html getEditorIcon(editor.icon)}</div>
+            {:else}
+              <Code2 class="w-3.5 h-3.5 text-slate-400 group-hover:text-primary" />
+            {/if}
+          </div>
+          <span class="font-medium text-slate-700 group-hover:text-primary">{editor.name}</span>
+        </button>
+      {:else}
+        <div class="px-3 py-2 text-slate-400 italic">No editors detected</div>
+      {/each}
+    </div>
 
     <div class="h-px bg-slate-100 my-1"></div>
 
