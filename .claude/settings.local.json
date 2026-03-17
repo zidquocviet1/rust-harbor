@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(mdfind:*)",
+      "Bash(defaults read:*)",
+      "Bash(cargo build:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:antigravity.google)",
+      "Bash(mdls:*)",
+      "Read(//usr/local/bin/**)",
+      "Read(//Users/maiviet/bin/**)",
+      "Bash(cd:*)",
+      "Bash(npx svelte-check:*)",
+      "Bash(cargo clean:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}

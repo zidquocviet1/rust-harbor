@@ -164,7 +164,12 @@
   let loading = $state(true);
   let isScanning = $state(false);
   let actionLoading = $state<Record<string, string | null>>({});
-  let hoveredAction = $state<{ path: string, label: string } | null>(null);
+  let hoveredAction = $state<{ path: string; label: string; x: number; y: number } | null>(null);
+
+  function hoverAction(e: MouseEvent, path: string, label: string) {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    hoveredAction = { path, label, x: rect.left + rect.width / 2, y: rect.top };
+  }
   let showLanguageDropdown = $state(false);
   let languageDropdownPosition = $state<{ top: number; left: number } | null>(null);
   let languageDropdownAnchor = $state<HTMLButtonElement | null>(null);
@@ -507,7 +512,7 @@
     return 1;
   });
 
-  const LIST_ITEM_HEIGHT = 120;
+  const LIST_ITEM_HEIGHT = 132;
   const LIST_GAP = 12;
   const GRID_ROW_HEIGHT = 360;
   const GRID_GAP = 24;
@@ -855,7 +860,7 @@
   }
 )}
   <Card
-    class="group glass border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-[background-color,border-color,box-shadow,transform] duration-200 hover:bg-white hover:border-slate-300/90 hover:shadow-[0_10px_22px_rgba(15,23,42,0.09)] hover:-translate-y-0.5 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer"
+    class="group glass border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-[background-color,border-color,box-shadow,transform] duration-200 hover:bg-white hover:border-slate-300/90 hover:shadow-[0_10px_22px_rgba(15,23,42,0.09)] hover:-translate-y-0.5 {viewMode === 'list' ? 'flex-row items-center py-3 px-6' : ''} cursor-pointer"
     style=""
     onclick={(e) => {
       if ((e.target as HTMLElement).closest('button')) return;
@@ -957,47 +962,41 @@
 
         <div class="mt-auto pt-8 flex items-center justify-between border-t border-slate-200/70 relative">
           <div class="flex items-center bg-white/85 rounded-full p-1.5 border border-slate-200/70 shadow-inner">
-            <Button 
-              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-slate-100" 
-              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
+            <Button
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-600"
+              onmouseenter={(e) => hoverAction(e, repo.path, 'Fetch')}
               onmouseleave={() => hoveredAction = null}
               disabled={!!actionLoading[`${repo.path}-fetch`]}
               onclick={() => runGitAction(repo, 'fetch')}
             >
               <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
             </Button>
-            <Button 
-              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-slate-100" 
-              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
+            <Button
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 transition-colors duration-200 hover:bg-sky-50 hover:text-sky-600"
+              onmouseenter={(e) => hoverAction(e, repo.path, 'Pull')}
               onmouseleave={() => hoveredAction = null}
               disabled={!!actionLoading[`${repo.path}-pull`]}
               onclick={() => runGitAction(repo, 'pull')}
             >
               <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
             </Button>
-            <Button 
-              variant="ghost" size="icon" class="rounded-full h-11 w-11 hover:bg-slate-100" 
-              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Push' }}
+            <Button
+              variant="ghost" size="icon" class="rounded-full h-11 w-11 transition-colors duration-200 hover:bg-violet-50 hover:text-violet-600"
+              onmouseenter={(e) => hoverAction(e, repo.path, 'Push')}
               onmouseleave={() => hoveredAction = null}
               disabled={!!actionLoading[`${repo.path}-push`]}
               onclick={() => runGitAction(repo, 'push')}
             >
-              <ArrowUp class="w-5 h-5 {actionLoading[`${repo.path}-push`] ? 'animate-pulse text-primary' : ''}" />
+              <ArrowUp class="w-5 h-5 {actionLoading[`${repo.path}-push`] ? 'animate-pulse text-violet-600' : ''}" />
             </Button>
           </div>
-
-          {#if hoveredAction?.path === repo.path}
-            <div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-bottom-1 duration-200 z-10">
-              {hoveredAction?.label}
-            </div>
-          {/if}
 
           <div class="flex items-center space-x-1">
             <Button
               variant="ghost"
               size="icon"
-              class="rounded-full hover:bg-slate-100"
-              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Explore' }}
+              class="rounded-full transition-colors duration-200 hover:bg-amber-50 hover:text-amber-600"
+              onmouseenter={(e) => hoverAction(e, repo.path, 'Explore')}
               onmouseleave={() => hoveredAction = null}
               onclick={() => openFolder(repo.path)}
             >
@@ -1006,7 +1005,9 @@
             <Button
               variant="ghost"
               size="icon"
-              class="rounded-full hover:bg-primary/10 hover:text-primary"
+              class="rounded-full transition-colors duration-200 hover:bg-primary/10 hover:text-primary"
+              onmouseenter={(e) => hoverAction(e, repo.path, 'Tag')}
+              onmouseleave={() => hoveredAction = null}
               onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
             >
               <Tag class="w-4 h-4" />
@@ -1016,20 +1017,20 @@
       </CardContent>
     {:else}
       <!-- List Item -->
-      <div class="flex-1 flex items-center justify-between py-2.5 px-5 overflow-hidden gap-6">
+      <div class="flex-1 flex items-center justify-between py-3 px-5 overflow-hidden gap-6">
         <div class="flex items-center space-x-4 min-w-0 flex-1">
           <div class="p-2.5 bg-white/80 rounded-2xl text-muted-foreground group-hover:text-primary transition-all duration-500 group-hover:bg-primary/10">
             <GitBranch class="w-5 h-5" />
           </div>
           <div class="min-w-0 flex-1">
-            <div class="flex items-center space-x-3 mb-0.5">
-              <h3 class="font-bold truncate text-base tracking-tight">{repo.name}</h3>
-              <div class="flex gap-1">
+            <div class="flex items-center space-x-3 mb-2">
+              <h3 class="font-bold truncate text-[15px] tracking-tight">{repo.name}</h3>
+              <div class="flex gap-1.5">
                 {#each langInfo.sortedLanguages.slice(0, 2) as [lang]}
                   {@const icon = getLanguageIcon(lang)}
-                  <span class="inline-flex items-center text-[8px] px-1.5 py-0.5 bg-white/80 border border-slate-200/70 text-muted-foreground font-black uppercase tracking-widest rounded-md">
+                  <span class="inline-flex items-center text-[11px] px-2 py-0.5 bg-white/80 border border-slate-200/70 text-muted-foreground font-bold uppercase tracking-wide rounded-md">
                     {#if icon}
-                      <svg viewBox="0 0 24 24" class="w-2.5 h-2.5 mr-1" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                      <svg viewBox="0 0 24 24" class="w-3 h-3 mr-1" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
                         <path fill="currentColor" d={icon.path}></path>
                       </svg>
                     {/if}
@@ -1039,26 +1040,26 @@
               </div>
             </div>
             {#if repo.description}
-              <p class="text-[12px] text-muted-foreground font-medium truncate italic mt-1">{repo.description}</p>
+              <p class="text-[13px] text-muted-foreground font-medium truncate leading-snug mb-2">{repo.description}</p>
             {/if}
             <!-- Inline tag badges -->
             {#if repo.tags.length}
-              <div class="flex flex-wrap gap-1 mt-1">
+              <div class="flex flex-wrap gap-1.5 mt-1">
                 {#each repo.tags.slice(0, 3) as tagName}
                   {@const match = $allTags.find(t => t.name === tagName)}
                   <span
-                    class="inline-flex items-center gap-1 text-[8px] px-1.5 py-0.5 rounded-full bg-white/80 border border-slate-200/80"
+                    class="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200/80 font-medium"
                     style={`border-color: ${match?.color ?? '#6366f1'}33`}
                   >
                     <span
-                      class="w-1.5 h-1.5 rounded-full"
+                      class="w-2 h-2 rounded-full shrink-0"
                       style={`background: ${match?.color ?? '#6366f1'}`}
                     ></span>
                     {tagName}
                   </span>
                 {/each}
                 {#if repo.tags.length > 3}
-                  <span class="text-[8px] px-1.5 py-0.5 rounded-full bg-white/80 border border-slate-200/80 font-bold">
+                  <span class="text-[11px] px-2 py-0.5 rounded-full bg-white/80 border border-slate-200/80 font-bold text-muted-foreground">
                     +{repo.tags.length - 3}
                   </span>
                 {/if}
@@ -1068,20 +1069,20 @@
         </div>
 
         <div class="flex items-center gap-6 flex-shrink-0">
-          <div class="w-24 flex flex-col items-center">
-            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Branch</span>
-            <span class="text-[15px] font-bold tracking-tight truncate max-w-[88px]">{repo.branch}</span>
+          <div class="w-28 flex flex-col items-center gap-1">
+            <span class="text-[11px] uppercase tracking-[0.2em] font-black text-muted-foreground">Branch</span>
+            <span class="text-sm font-bold tracking-tight truncate max-w-[104px]">{repo.branch}</span>
           </div>
-          <div class="w-24 flex flex-col items-center">
-            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Status</span>
-            <div class="flex items-center space-x-2">
-              <status.icon class="w-4 h-4 {status.color}" />
-              <span class="text-[15px] font-bold tracking-tight {status.color}">{status.label}</span>
+          <div class="w-28 flex flex-col items-center gap-1">
+            <span class="text-[11px] uppercase tracking-[0.2em] font-black text-muted-foreground">Status</span>
+            <div class="flex items-center space-x-1.5">
+              <status.icon class="w-3.5 h-3.5 {status.color}" />
+              <span class="text-sm font-bold tracking-tight {status.color}">{status.label}</span>
             </div>
           </div>
-          <div class="w-28 flex flex-col items-center">
-            <span class="text-[9px] uppercase tracking-[0.25em] font-black text-muted-foreground mb-1.5">Activity</span>
-            <span class="text-[15px] font-bold text-muted-foreground tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
+          <div class="w-28 flex flex-col items-center gap-1">
+            <span class="text-[11px] uppercase tracking-[0.2em] font-black text-muted-foreground">Activity</span>
+            <span class="text-sm font-bold text-muted-foreground tracking-tight">{formatRelativeTime(repo.last_modified)}</span>
           </div>
         </div>
 
@@ -1089,23 +1090,25 @@
           <Button
             variant="ghost"
             size="icon"
-            class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-primary transition-all"
+            class="rounded-xl h-11 w-11 transition-colors duration-200 hover:bg-primary/10 hover:text-primary"
+            onmouseenter={(e) => hoverAction(e, repo.path, 'Tag')}
+            onmouseleave={() => hoveredAction = null}
             onclick={(e) => openTagPopover(repo, e.currentTarget as HTMLElement)}
           >
             <Tag class="w-4 h-4" />
           </Button>
-          <Button 
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-emerald-500" 
-             onmouseenter={() => hoveredAction = { path: repo.path, label: 'Fetch' }}
+          <Button
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-600"
+             onmouseenter={(e) => hoverAction(e, repo.path, 'Fetch')}
              onmouseleave={() => hoveredAction = null}
              disabled={!!actionLoading[`${repo.path}-fetch`]}
              onclick={() => runGitAction(repo, 'fetch')}
           >
             <RefreshCw class="w-5 h-5 {actionLoading[`${repo.path}-fetch`] ? 'animate-spin' : ''}" />
           </Button>
-          <Button 
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-primary" 
-             onmouseenter={() => hoveredAction = { path: repo.path, label: 'Pull' }}
+          <Button
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 transition-colors duration-200 hover:bg-sky-50 hover:text-sky-600"
+             onmouseenter={(e) => hoverAction(e, repo.path, 'Pull')}
              onmouseleave={() => hoveredAction = null}
              disabled={!!actionLoading[`${repo.path}-pull`]}
              onclick={() => runGitAction(repo, 'pull')}
@@ -1113,19 +1116,13 @@
             <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
           </Button>
           <Button
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-blue-500"
-             onmouseenter={() => hoveredAction = { path: repo.path, label: 'Finder' }}
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 transition-colors duration-200 hover:bg-amber-50 hover:text-amber-600"
+             onmouseenter={(e) => hoverAction(e, repo.path, 'Explore')}
              onmouseleave={() => hoveredAction = null}
              onclick={() => openFolder(repo.path)}
           >
             <FolderOpen class="w-5 h-5" />
           </Button>
-
-          {#if hoveredAction?.path === repo.path}
-            <div class="absolute -top-12 right-0 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in slide-in-from-right-1 duration-200 z-10 whitespace-nowrap">
-              {hoveredAction?.label}
-            </div>
-          {/if}
         </div>
       </div>
     {/if}
@@ -1686,5 +1683,15 @@
       <RefreshCw class="w-4 h-4 text-slate-400 group-hover:text-primary" />
       <span class="font-medium text-slate-700 group-hover:text-primary">Git Fetch</span>
     </button>
+  </div>
+{/if}
+
+<!-- Global action tooltip — fixed so it escapes overflow-hidden cards -->
+{#if hoveredAction}
+  <div
+    class="fixed pointer-events-none z-[9999] -translate-x-1/2 bg-primary px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-primary-foreground shadow-glow animate-in fade-in zoom-in-95 duration-150 whitespace-nowrap"
+    style="left: {hoveredAction.x}px; top: {hoveredAction.y - 36}px;"
+  >
+    {hoveredAction.label}
   </div>
 {/if}
