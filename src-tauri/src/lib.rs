@@ -7,9 +7,9 @@ pub mod services;
 use crate::controllers::{repo, settings, tags};
 use crate::services::watcher::RepoWatcher;
 use crate::services::database;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::Manager;
-use tokio::sync::Mutex;
 
 #[tauri::command]
 fn is_git_installed(app: tauri::AppHandle) -> bool {
@@ -29,7 +29,7 @@ fn is_git_installed(app: tauri::AppHandle) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(Arc::new(Mutex::new(RepoWatcher::new())))
+        .manage(Arc::new(tokio::sync::Mutex::new(RepoWatcher::new())))
         .manage(repo::RepoCache::new())
         .manage(repo::ScanStatus(std::sync::atomic::AtomicBool::new(false)))
         .plugin(tauri_plugin_opener::init())
@@ -39,6 +39,52 @@ pub fn run() {
             let db_pool = database::init_database(app.handle())
                 .expect("Failed to initialise database");
             app.manage(db_pool);
+
+            // ── Window state: restore saved size ─────────────────────────────
+            let window = app.get_webview_window("main").expect("main window not found");
+
+            if let Ok(state) = crate::config::load_window_state(app.handle()) {
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: state.width,
+                    height: state.height,
+                }));
+            }
+
+            // ── Window state: persist on resize (debounced 500 ms) ───────────
+            // Uses a plain std::sync::Mutex<Instant> — no async locking needed.
+            // Every resize records the current time; the spawned task only saves
+            // if no newer resize arrived during the 500 ms sleep.
+            let app_handle = app.handle().clone();
+            let last_resize: Arc<Mutex<Instant>> = Arc::new(Mutex::new(
+                Instant::now() - Duration::from_secs(1),
+            ));
+
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Resized(size) = event {
+                    let (w, h) = (size.width, size.height);
+
+                    // Ignore minimised / zero-size states
+                    if w < 200 || h < 200 {
+                        return;
+                    }
+
+                    *last_resize.lock().unwrap() = Instant::now();
+
+                    let app_handle = app_handle.clone();
+                    let last_resize = last_resize.clone();
+
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+
+                        // Only the task fired by the *last* resize will pass this check
+                        if last_resize.lock().unwrap().elapsed() >= Duration::from_millis(480) {
+                            let state = crate::config::WindowState { width: w, height: h };
+                            let _ = crate::config::save_window_state(&app_handle, &state);
+                        }
+                    });
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
