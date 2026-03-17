@@ -33,9 +33,12 @@
     Tag
   } from "lucide-svelte";
   import { tick } from "svelte";
+  import { fade, fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import hljs from 'highlight.js';
   import 'highlight.js/styles/github-dark.css';
   import GroupHeader from "$lib/components/custom/GroupHeader.svelte";
+  import OpenInEditor from "$lib/components/custom/OpenInEditor.svelte";
   import type { SimpleIcon } from "simple-icons";
   import {
     siC,
@@ -163,7 +166,7 @@
   let hoveredAction = $state<{ path: string, label: string } | null>(null);
   let showLanguageDropdown = $state(false);
   let languageDropdownPosition = $state<{ top: number; left: number } | null>(null);
-  let languageDropdownAnchor: HTMLButtonElement | null = null;
+  let languageDropdownAnchor = $state<HTMLButtonElement | null>(null);
   let selectedRepoForPreview = $state<RepoMetadata | null>(null);
   let readmeContent = $state<{ html: string, raw: string }>({ html: "", raw: "" });
   let readmeLoading = $state(false);
@@ -181,6 +184,9 @@
   let groupObserver: IntersectionObserver | null = null;
   let viewportWidth = $state(0);
   let appConfig = $state<{ watched_folders: string[]; group_by_mode?: string | null } | null>(null);
+  let repoContextMenuRepo = $state<RepoMetadata | null>(null);
+  let repoContextMenuPosition = $state<{ x: number; y: number } | null>(null);
+  let installedEditors = $state<any[]>([]);
 
   function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -252,10 +258,21 @@
     }
   });
 
+  let isClosingPanel = $state(false);
+
   function closePreview() {
-    selectedRepoForPreview = null;
-    readmeContent = { html: "", raw: "" };
+    if (isClosingPanel) return;
+    isClosingPanel = true;
+    // Increment request ID first to cancel any pending loads
     previewRequestId += 1;
+    // Defer state change to next tick to avoid blocking the click event
+    setTimeout(() => {
+      selectedRepoForPreview = null;
+      // Reset closing flag after transition completes
+      setTimeout(() => {
+        isClosingPanel = false;
+      }, 300);
+    }, 0);
   }
 
   function enhanceReadme(node: HTMLElement) {
@@ -597,6 +614,35 @@
     }
   }
 
+  async function loadInstalledEditors() {
+    try {
+      installedEditors = await invoke("get_installed_editors") as any[];
+    } catch (e) {
+      console.error("Failed to load editors:", e);
+    }
+  }
+
+  function handleRepoContextMenu(event: MouseEvent, repo: RepoMetadata) {
+    event.preventDefault();
+    repoContextMenuRepo = repo;
+    repoContextMenuPosition = { x: event.clientX, y: event.clientY };
+  }
+
+  function closeRepoContextMenu() {
+    repoContextMenuRepo = null;
+    repoContextMenuPosition = null;
+  }
+
+  async function openInEditor(editorId: string, repoPath: string) {
+    try {
+      await invoke("open_in_editor", { editorId, path: repoPath });
+      toast.success("Opening editor...");
+      closeRepoContextMenu();
+    } catch (e) {
+      toast.error(`Failed: ${e}`);
+    }
+  }
+
   async function runGitAction(repo: RepoMetadata, action: 'fetch' | 'pull' | 'push') {
     const key = `${repo.path}-${action}`;
     actionLoading[key] = action;
@@ -651,6 +697,7 @@
       console.error("Failed to load tags:", e);
     });
 
+    void loadInstalledEditors();
     await Promise.allSettled([loadRepos(), loadTagsPromise, configPromise]);
     loading = false;
 
@@ -784,15 +831,14 @@
     status: { icon: typeof CheckCircle2; color: string; label: string };
   }
 )}
-  <Card 
-    class="group glass glass-hover border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-all duration-500 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer {selectedRepoForPreview?.path === repo.path ? 'ring-2 ring-primary border-primary/40 shadow-glow bg-primary/5' : ''}"
-    style={viewMode === 'grid'
-      ? "content-visibility: auto; contain-intrinsic-size: 360px 320px;"
-      : "content-visibility: auto; contain-intrinsic-size: 120px 96px;"}
+  <Card
+    class="group glass border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-[background-color,border-color,box-shadow,transform] duration-200 hover:bg-white hover:border-slate-300/90 hover:shadow-[0_10px_22px_rgba(15,23,42,0.09)] hover:-translate-y-0.5 {viewMode === 'list' ? 'flex-row items-center py-2 px-6' : ''} cursor-pointer"
+    style=""
     onclick={(e) => {
       if ((e.target as HTMLElement).closest('button')) return;
       openPreview(repo);
     }}
+    oncontextmenu={(e) => handleRepoContextMenu(e, repo)}
   >
     {@const langInfo = getRepoLanguageInfo(repo)}
     {#if viewMode === 'grid'}
@@ -1043,8 +1089,8 @@
           >
             <ArrowDown class="w-5 h-5 {actionLoading[`${repo.path}-pull`] ? 'animate-bounce' : ''}" />
           </Button>
-          <Button 
-             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-blue-500" 
+          <Button
+             variant="ghost" size="icon" class="rounded-xl h-11 w-11 hover:bg-slate-100 hover:text-blue-500"
              onmouseenter={() => hoveredAction = { path: repo.path, label: 'Finder' }}
              onmouseleave={() => hoveredAction = null}
              onclick={() => openFolder(repo.path)}
@@ -1063,7 +1109,7 @@
   </Card>
 {/snippet}
 
-<div class="p-8 space-y-8 animate-in fade-in duration-500 max-w-7xl mx-auto">
+<div class="p-8 space-y-8 max-w-7xl mx-auto">
   <!-- Header / Filters -->
   <div class="space-y-5">
     <div>
@@ -1352,14 +1398,19 @@
 
 <!-- Side Panel (README Preview) -->
 {#if selectedRepoForPreview}
-  <div 
-    class="fixed inset-0 bg-slate-900/20 backdrop-blur-[2px] z-[100] transition-all duration-300"
+  <button
+    type="button"
+    class="fixed inset-0 bg-slate-900/20 z-[100] cursor-default"
     onclick={closePreview}
-    aria-hidden="true"
-  ></div>
-  <div 
-    class="fixed top-0 right-0 h-full w-[45%] bg-background border-l border-slate-200/80 z-[101] flex flex-col shadow-2xl animate-in slide-in-from-right duration-500 ease-out"
+    aria-label="Close preview"
+    in:fade={{ duration: 200 }}
+  ></button>
+  <div
+    class="fixed top-0 right-0 h-full w-[45%] lg:w-[50%] bg-background border-l border-slate-200/80 z-[101] flex flex-col shadow-[0_0_40px_rgba(0,0,0,0.1)] will-change-transform"
+    in:fly={{ x: '100%', duration: 350, opacity: 1, easing: cubicOut }}
+    out:fly={{ x: '100%', duration: 280, opacity: 1, easing: cubicOut }}
   >
+    <!-- Header -->
     <div class="p-6 border-b border-slate-200/70 flex items-center justify-between bg-white/80">
       <div class="space-y-1">
         <h2 class="text-xl font-black uppercase tracking-widest">{selectedRepoForPreview.name}</h2>
@@ -1369,166 +1420,242 @@
       </Button>
     </div>
 
-    <!-- Mode Selector -->
-    <div class="px-6 py-4 flex items-center justify-between border-b border-slate-200/70 bg-white/[0.02]">
-      <div class="flex items-center space-x-2 bg-white/80 p-1 rounded-xl border border-slate-200/80">
-        <button 
-          onclick={() => previewMode = 'markdown'}
-          class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'markdown' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
-        >
-          Markdown
-        </button>
-        <button 
-          onclick={() => previewMode = 'unified'}
-          class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'unified' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
-        >
-          Unified
-        </button>
-      </div>
-      
-      <div class="flex items-center gap-2">
-         <Button variant="outline" size="sm" class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100" onclick={() => selectedRepoForPreview && openFolder(selectedRepoForPreview.path)}>
-           <FolderOpen class="w-3 h-3 mr-2 text-primary" />
-           Open Folder
-         </Button>
-      </div>
-    </div>
-
-    <div class="flex-1 overflow-y-auto p-12 prose prose-lg prose-neutral max-w-none no-scrollbar 
-      prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-      prose-blockquote:border-l-primary prose-blockquote:bg-primary/5 prose-blockquote:rounded-r-2xl prose-blockquote:py-2
-      prose-img:rounded-3xl prose-img:border prose-img:border-slate-200/80 prose-img:shadow-2xl">
-      {#if readmeLoading}
-        <div class="h-full flex flex-col items-center justify-center space-y-6 py-48">
-          <div class="relative w-16 h-16">
-            <RefreshCw class="w-full h-full animate-spin text-primary opacity-20" />
-            <div class="absolute inset-0 flex items-center justify-center">
-              <FileText class="w-6 h-6 text-primary" />
-            </div>
+    {#if readmeLoading}
+      <div class="flex-1 flex flex-col items-center justify-center space-y-6 py-48" in:fade={{ duration: 200 }}>
+        <div class="relative w-16 h-16">
+          <RefreshCw class="w-full h-full animate-spin text-primary opacity-20" />
+          <div class="absolute inset-0 flex items-center justify-center">
+            <FileText class="w-6 h-6 text-primary" />
           </div>
-          <p class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse">Decrypting Repository Core</p>
         </div>
-      {:else}
-        {#if previewMode === 'markdown'}
-          <div class="animate-in fade-in slide-in-from-bottom-4 duration-1000" use:enhanceReadme>
-            {@html readmeContent.html}
+        <p class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse">Decrypting Repository Core</p>
+      </div>
+    {:else if readmeContent.html}
+      <div class="flex-1 flex flex-col overflow-hidden" in:fade={{ duration: 200, delay: 50 }}>
+        <!-- Mode Selector -->
+        <div class="px-6 py-4 flex items-center justify-between border-b border-slate-200/70 bg-white/[0.02]">
+          <div class="flex items-center space-x-2 bg-white/80 p-1 rounded-xl border border-slate-200/80">
+            <button 
+              onclick={() => previewMode = 'markdown'}
+              class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'markdown' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
+            >
+              Markdown
+            </button>
+            <button 
+              onclick={() => previewMode = 'unified'}
+              class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode === 'unified' ? 'bg-primary text-primary-foreground shadow-glow' : 'text-muted-foreground hover:text-foreground'}"
+            >
+              Unified
+            </button>
           </div>
-        {:else}
-          <div class="space-y-10 animate-in fade-in duration-500 pb-20">
-            <div class="space-y-4">
-              <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Metadata Summary</h3>
-              <div class="grid grid-cols-2 gap-4">
-                 <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70">
-                   <p class="text-[9px] text-muted-foreground uppercase font-black mb-1.5 tracking-widest">Active Branch</p>
-                   <div class="flex items-center gap-2.5">
-                     <div class="p-1.5 bg-primary/10 rounded-lg text-primary">
-                       <GitBranch class="w-4 h-4" />
-                     </div>
-                     <span class="text-sm font-bold tracking-tight">{selectedRepoForPreview.branch}</span>
-                   </div>
-                 </div>
-                 <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70">
-                   <p class="text-[9px] text-muted-foreground uppercase font-black mb-1.5 tracking-widest">Dock Progress</p>
-                   <div class="flex items-center gap-2.5">
-                     <div class="p-1.5 bg-amber-500/10 rounded-lg text-amber-500">
-                       <Clock class="w-4 h-4" />
-                     </div>
-                     <span class="text-sm font-bold tracking-tight">{getSyncStatusDetails(selectedRepoForPreview.sync_status).label}</span>
-                   </div>
-                 </div>
-              </div>
-            </div>
-            
-            <div class="space-y-4">
-               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Manifested Artifacts</h3>
-               <div class="flex flex-wrap gap-2.5">
-                 {#each getRepoLanguageInfo(selectedRepoForPreview).sortedLanguages as [lang, count]}
-                   {@const icon = getLanguageIcon(lang)}
-                   <div class="bg-white/90 px-5 py-3 rounded-2xl border border-slate-200/70 flex items-center gap-4 hover:border-primary/20 transition-colors">
-                     {#if icon}
-                       <svg viewBox="0 0 24 24" class="w-4 h-4 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
-                         <path fill="currentColor" d={icon.path}></path>
-                       </svg>
-                     {:else}
-                       <div class="w-2 h-2 rounded-full bg-primary/40"></div>
-                     {/if}
-                     <span class="text-xs font-bold uppercase tracking-wider">{lang}</span>
-                     <span class="text-[9px] font-black p-1 bg-white/80 rounded border border-slate-200/70 text-muted-foreground">{count}</span>
-                   </div>
-                 {/each}
-               </div>
-            </div>
+          
+          <div class="flex items-center gap-2">
+             <OpenInEditor 
+               repoPath={selectedRepoForPreview.path}
+               variant="outline"
+               size="sm"
+               class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100"
+               externalEditors={installedEditors}
+             />
+             <Button variant="outline" size="sm" class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100" onclick={() => selectedRepoForPreview && openFolder(selectedRepoForPreview.path)}>
+               <FolderOpen class="w-3 h-3 mr-2 text-primary" />
+               Open Folder
+             </Button>
+          </div>
+        </div>
 
-            {#if selectedRepoForPreview.description}
+        <div class="flex-1 overflow-y-auto p-12 prose prose-lg prose-neutral max-w-none no-scrollbar 
+          prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+          prose-blockquote:border-l-primary prose-blockquote:bg-primary/5 prose-blockquote:rounded-r-2xl prose-blockquote:py-2
+          prose-img:rounded-3xl prose-img:border prose-img:border-slate-200/80 prose-img:shadow-2xl">
+          
+          {#if previewMode === 'markdown'}
+            <div class="animate-in fade-in slide-in-from-bottom-2 duration-300" use:enhanceReadme>
+              {@html readmeContent.html}
+            </div>
+          {:else}
+            <div class="space-y-10 animate-in fade-in duration-200 pb-20">
               <div class="space-y-4">
-                 <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Intelligence</h3>
-                 <div class="bg-primary/5 p-6 rounded-3xl border border-primary/10 italic text-sm text-muted-foreground leading-relaxed">
-                   "{selectedRepoForPreview.description}"
+                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Metadata Summary</h3>
+                <div class="grid grid-cols-2 gap-4">
+                   <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70">
+                     <p class="text-[9px] text-muted-foreground uppercase font-black mb-1.5 tracking-widest">Active Branch</p>
+                     <div class="flex items-center gap-2.5">
+                       <div class="p-1.5 bg-primary/10 rounded-lg text-primary">
+                         <GitBranch class="w-4 h-4" />
+                       </div>
+                       <span class="text-sm font-bold tracking-tight">{selectedRepoForPreview.branch}</span>
+                     </div>
+                   </div>
+                   <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70">
+                     <p class="text-[9px] text-muted-foreground uppercase font-black mb-1.5 tracking-widest">Dock Progress</p>
+                     <div class="flex items-center gap-2.5">
+                       <div class="p-1.5 bg-amber-500/10 rounded-lg text-amber-500">
+                         <Clock class="w-4 h-4" />
+                       </div>
+                       <span class="text-sm font-bold tracking-tight">{getSyncStatusDetails(selectedRepoForPreview.sync_status).label}</span>
+                     </div>
+                   </div>
+                </div>
+              </div>
+              
+              <div class="space-y-4">
+                 <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Manifested Artifacts</h3>
+                 <div class="flex flex-wrap gap-2.5">
+                   {#each getRepoLanguageInfo(selectedRepoForPreview).sortedLanguages as [lang, count]}
+                     {@const icon = getLanguageIcon(lang)}
+                     <div class="bg-white/90 px-5 py-3 rounded-2xl border border-slate-200/70 flex items-center gap-4 hover:border-primary/20 transition-colors">
+                       {#if icon}
+                         <svg viewBox="0 0 24 24" class="w-4 h-4 shrink-0" style={`color: #${icon.hex}`} aria-label={`${lang} icon`}>
+                           <path fill="currentColor" d={icon.path}></path>
+                         </svg>
+                       {:else}
+                         <div class="w-2 h-2 rounded-full bg-primary/40"></div>
+                       {/if}
+                       <span class="text-xs font-bold uppercase tracking-wider">{lang}</span>
+                       <span class="text-[9px] font-black p-1 bg-white/80 rounded border border-slate-200/70 text-muted-foreground">{count}</span>
+                     </div>
+                   {/each}
                  </div>
               </div>
-            {/if}
 
-            <div class="space-y-4">
-               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Tags</h3>
-               <div class="flex flex-wrap gap-2">
-                 {#if selectedRepoForPreview.tags?.length}
-                   {#each selectedRepoForPreview.tags as tagName}
-                     {@const match = $allTags.find(t => t.name === tagName)}
-                     <span
-                       class="inline-flex items-center gap-2 text-[10px] px-3 py-1 rounded-full bg-white/90 border border-slate-200/80 font-semibold text-muted-foreground"
-                       style={`border-color: ${match?.color ?? '#6366f1'}55`}
-                     >
+              {#if selectedRepoForPreview.description}
+                <div class="space-y-4">
+                   <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Intelligence</h3>
+                   <div class="bg-primary/5 p-6 rounded-3xl border border-primary/10 italic text-sm text-muted-foreground leading-relaxed">
+                     "{selectedRepoForPreview.description}"
+                   </div>
+                </div>
+              {/if}
+
+              <div class="space-y-4">
+                 <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Tags</h3>
+                 <div class="flex flex-wrap gap-2">
+                   {#if selectedRepoForPreview.tags?.length}
+                     {#each selectedRepoForPreview.tags as tagName}
+                       {@const match = $allTags.find(t => t.name === tagName)}
                        <span
-                         class="w-2 h-2 rounded-full"
-                         style={`background: ${match?.color ?? '#6366f1'}`}
-                       ></span>
-                       {tagName}
-                     </span>
-                   {/each}
-                 {:else}
-                   <span class="text-xs text-muted-foreground">No tags assigned</span>
-                 {/if}
-               </div>
-            </div>
+                         class="inline-flex items-center gap-2 text-[10px] px-3 py-1 rounded-full bg-white/90 border border-slate-200/80 font-semibold text-muted-foreground"
+                         style={`border-color: ${match?.color ?? '#6366f1'}55`}
+                       >
+                         <span
+                           class="w-2 h-2 rounded-full"
+                           style={`background: ${match?.color ?? '#6366f1'}`}
+                         ></span>
+                         {tagName}
+                       </span>
+                     {/each}
+                   {:else}
+                     <span class="text-xs text-muted-foreground">No tags assigned</span>
+                   {/if}
+                 </div>
+              </div>
 
-            <div class="space-y-4">
-               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Local Directory</h3>
-               <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
-                 <div class="flex items-center gap-3 min-w-0">
-                   <FolderOpen class="w-4 h-4 text-muted-foreground" />
-                   <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">{selectedRepoForPreview.path}</span>
+              <div class="space-y-4">
+                 <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Local Directory</h3>
+                 <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
+                   <div class="flex items-center gap-3 min-w-0">
+                     <FolderOpen class="w-4 h-4 text-muted-foreground" />
+                     <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">{selectedRepoForPreview.path}</span>
+                   </div>
                  </div>
-               </div>
-            </div>
-            
-            <div class="space-y-4">
-               <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Remote Link</h3>
-               <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
-                 <div class="flex items-center gap-3">
-                    <Globe class="w-4 h-4 text-muted-foreground" />
-                    {#if selectedRepoForPreview.remote_url}
-                      <a
-                        href={selectedRepoForPreview.remote_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        class="text-xs font-mono text-primary truncate max-w-xs hover:underline underline-offset-4"
-                      >
-                        {selectedRepoForPreview.remote_url}
-                      </a>
-                    {:else}
-                      <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">No Remote Configured</span>
-                    {/if}
+              </div>
+              
+              <div class="space-y-4">
+                 <h3 class="text-xs font-black uppercase tracking-[0.2em] text-primary border-l-2 border-primary pl-4">Remote Link</h3>
+                 <div class="bg-white/90 p-5 rounded-2xl border border-slate-200/70 flex items-center justify-between">
+                   <div class="flex items-center gap-3">
+                      <Globe class="w-4 h-4 text-muted-foreground" />
+                      {#if selectedRepoForPreview.remote_url}
+                        <a
+                          href={selectedRepoForPreview.remote_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          class="text-xs font-mono text-primary truncate max-w-xs hover:underline underline-offset-4"
+                        >
+                          {selectedRepoForPreview.remote_url}
+                        </a>
+                      {:else}
+                        <span class="text-xs font-mono text-muted-foreground truncate max-w-xs">No Remote Configured</span>
+                      {/if}
+                   </div>
+                   {#if selectedRepoForPreview.remote_url}
+                      <Badge variant="outline" class="{selectedRepoForPreview.remote_reachable ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'} border-transparent">
+                        {selectedRepoForPreview.remote_reachable ? 'Online' : 'Offline'}
+                      </Badge>
+                   {/if}
                  </div>
-                 {#if selectedRepoForPreview.remote_url}
-                    <Badge variant="outline" class="{selectedRepoForPreview.remote_reachable ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'} border-transparent">
-                      {selectedRepoForPreview.remote_reachable ? 'Online' : 'Offline'}
-                    </Badge>
-                 {/if}
-               </div>
+              </div>
             </div>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <div class="flex-1 flex flex-col items-center justify-center space-y-6 py-48" in:fade={{ duration: 200 }}>
+        <div class="relative w-16 h-16">
+          <FileText class="w-full h-full text-primary opacity-20" />
+          <div class="absolute inset-0 flex items-center justify-center">
+            <RefreshCw class="w-6 h-6 text-primary animate-spin" />
           </div>
-        {/if}
-      {/if}
+        </div>
+        <p class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse">No README Found</p>
+      </div>
+    {/if}
+  </div>
+{/if}
+
+{#if repoContextMenuRepo && repoContextMenuPosition}
+  <button 
+    type="button"
+    aria-label="Close repo context menu"
+    class="fixed inset-0 z-[110]"
+    onclick={closeRepoContextMenu}
+    oncontextmenu={(e) => { e.preventDefault(); closeRepoContextMenu(); }}
+  ></button>
+  <div
+    class="fixed z-[111] w-56 bg-white/95 backdrop-blur-md border border-slate-200 rounded-2xl shadow-2xl py-2 text-xs overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+    style={`top: ${repoContextMenuPosition.y}px; left: ${repoContextMenuPosition.x}px;`}
+  >
+    <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+      Repository Actions
     </div>
+    
+    <button
+      class="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-primary/5 text-left transition-colors group"
+      onclick={() => { repoContextMenuRepo && openFolder(repoContextMenuRepo.path); closeRepoContextMenu(); }}
+    >
+      <FolderOpen class="w-4 h-4 text-slate-400 group-hover:text-primary" />
+      <span class="font-medium text-slate-700 group-hover:text-primary">Show in Finder</span>
+    </button>
+
+    <div class="h-px bg-slate-100 my-1"></div>
+
+    <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+      Open In Editor
+    </div>
+    
+    {#each installedEditors as editor}
+      <button
+        class="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-primary/5 text-left transition-colors group"
+        onclick={() => repoContextMenuRepo && openInEditor(editor.id, repoContextMenuRepo.path)}
+      >
+        <div class="w-4 h-4 flex items-center justify-center">
+           <Code2 class="w-3.5 h-3.5 text-slate-400 group-hover:text-primary" />
+        </div>
+        <span class="font-medium text-slate-700 group-hover:text-primary">{editor.name}</span>
+      </button>
+    {:else}
+      <div class="px-3 py-2 text-slate-400 italic">No editors detected</div>
+    {/each}
+
+    <div class="h-px bg-slate-100 my-1"></div>
+
+    <button
+      class="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-primary/5 text-left transition-colors group"
+      onclick={() => { repoContextMenuRepo && runGitAction(repoContextMenuRepo, 'fetch'); closeRepoContextMenu(); }}
+    >
+      <RefreshCw class="w-4 h-4 text-slate-400 group-hover:text-primary" />
+      <span class="font-medium text-slate-700 group-hover:text-primary">Git Fetch</span>
+    </button>
   </div>
 {/if}

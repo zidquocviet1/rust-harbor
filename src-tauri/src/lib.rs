@@ -61,6 +61,8 @@ pub fn run() {
             tags::assign_tag,
             tags::remove_tag,
             tags::get_repo_tags,
+            repo::get_installed_editors,
+            repo::open_in_editor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

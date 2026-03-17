@@ -5,6 +5,8 @@ use crate::services::watcher::WatcherState;
 use crate::services::repo_service::{get_repo_metadata, update_repo_cache};
 use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags, load_repositories, save_repositories, clear_repositories};
 use crate::models::repo::RepoMetadata;
+use crate::models::editor::EditorInfo;
+use crate::services::editor::{get_installed_editors as check_editors, open_path_in_editor};
 use tauri::{AppHandle, Manager, Emitter};
 use serde::Serialize;
 use dashmap::DashMap;
@@ -221,4 +223,14 @@ fn execute_git_command(path: String, args: &[&str], git_path: &str) -> Result<St
     } else {
         Err(crate::error::Error::GitError(String::from_utf8_lossy(&output.stderr).to_string()))
     }
+}
+
+#[tauri::command]
+pub async fn get_installed_editors() -> Result<Vec<EditorInfo>> {
+    Ok(check_editors())
+}
+
+#[tauri::command]
+pub async fn open_in_editor(editor_id: String, path: String) -> Result<()> {
+    open_path_in_editor(&editor_id, &path).map_err(|e| crate::error::Error::IoError(e))
 }
