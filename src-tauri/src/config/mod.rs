@@ -2,6 +2,49 @@ use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::fs;
 
+// ── Window state ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WindowState {
+    pub width: u32,
+    pub height: u32,
+}
+
+fn get_window_state_path(app_handle: &tauri::AppHandle) -> crate::error::Result<PathBuf> {
+    use tauri::Manager;
+    let mut path = app_handle
+        .path()
+        .app_config_dir()
+        .map_err(|e| crate::error::Error::SystemError(format!("Failed to get config dir: {}", e)))?;
+
+    if !path.exists() {
+        fs::create_dir_all(&path)?;
+    }
+
+    path.push("window-state.json");
+    Ok(path)
+}
+
+pub fn load_window_state(app_handle: &tauri::AppHandle) -> crate::error::Result<WindowState> {
+    let path = get_window_state_path(app_handle)?;
+
+    if !path.exists() {
+        return Ok(WindowState { width: 1400, height: 900 });
+    }
+
+    let content = fs::read_to_string(path)?;
+    serde_json::from_str(&content)
+        .map_err(|e| crate::error::Error::ConfigError(format!("Failed to parse window state: {}", e)))
+}
+
+pub fn save_window_state(app_handle: &tauri::AppHandle, state: &WindowState) -> crate::error::Result<()> {
+    let path = get_window_state_path(app_handle)?;
+    let content = serde_json::to_string(state)
+        .map_err(|e| crate::error::Error::ConfigError(format!("Failed to serialize window state: {}", e)))?;
+    fs::write(path, content)?;
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub watched_folders: Vec<String>,
