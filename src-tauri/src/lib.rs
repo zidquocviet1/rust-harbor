@@ -40,6 +40,15 @@ pub fn run() {
                 .expect("Failed to initialise database");
             app.manage(db_pool);
 
+            // ── Start watcher on every launch ────────────────────────────────
+            // refresh_repos scans configured folders, starts the filesystem watcher,
+            // and updates the cache. Must run at startup even when SQLite already
+            // has repo data (the watcher is only started inside refresh_repos).
+            let app_handle_watcher = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::controllers::repo::refresh_repos(app_handle_watcher).await;
+            });
+
             // ── Window state: restore saved size ─────────────────────────────
             let window = app.get_webview_window("main").expect("main window not found");
 
