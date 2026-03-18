@@ -75,7 +75,7 @@ pub fn get_repo_metadata(path: &Path, git_path: &str) -> Option<RepoMetadata> {
 pub fn update_repo_cache(app: &AppHandle, path_str: &str) {
     let cache = app.state::<RepoCache>();
     let path = Path::new(path_str);
-    
+
     let git_path = crate::config::load_config(app)
         .map(|c| c.git_path)
         .unwrap_or_else(|_| "git".to_string());
@@ -91,6 +91,98 @@ pub fn update_repo_cache(app: &AppHandle, path_str: &str) {
         cache.0.insert(path_str.to_string(), metadata);
         let _ = app.emit("repo-state-changed", ());
     }
+}
+
+/// Like `update_repo_cache` but skips the blocking `verify_remote_connectivity` call.
+/// Reuses the cached `remote_reachable` value instead. Used by the filesystem watcher
+/// so that branch/status changes reflect in the UI immediately without a network round-trip.
+pub fn update_repo_cache_local(app: &AppHandle, path_str: &str) {
+    let cache = app.state::<RepoCache>();
+    let path = Path::new(path_str);
+
+    let git_path = crate::config::load_config(app)
+        .map(|c| c.git_path)
+        .unwrap_or_else(|_| "git".to_string());
+
+    // Reuse cached remote reachability — avoids blocking network call on every file event
+    let cached_remote_reachable = cache.0.get(path_str)
+        .map(|entry| entry.remote_reachable)
+        .unwrap_or(false);
+
+    if let Some(mut metadata) = get_repo_metadata_local(path, &git_path, cached_remote_reachable) {
+        if let Ok(conn) = app.state::<DbPool>().0.lock() {
+            if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
+                if let Some(tags) = tag_map.get(path_str) {
+                    metadata.tags = tags.clone();
+                }
+            }
+        }
+        cache.0.insert(path_str.to_string(), metadata);
+        let _ = app.emit("repo-state-changed", ());
+    }
+}
+
+/// Same as `get_repo_metadata` but accepts a pre-computed `remote_reachable` value
+/// instead of making a live network call.
+fn get_repo_metadata_local(path: &Path, git_path: &str, remote_reachable: bool) -> Option<RepoMetadata> {
+    let repo = Repository::open(path).ok()?;
+    let name = path.file_name()?.to_string_lossy().to_string();
+    let path_str = path.to_string_lossy().to_string();
+
+    let head = repo.head().ok();
+    let branch = head.as_ref()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()))
+        .unwrap_or_else(|| "detached".to_string());
+
+    let last_modified = head.as_ref()
+        .and_then(|h| h.peel_to_commit().ok())
+        .map(|c| c.time().seconds())
+        .unwrap_or(0);
+
+    let languages = analyze_languages(path);
+    let description = get_repo_description(path);
+
+    let mut status_options = git2::StatusOptions::new();
+    status_options.include_untracked(true);
+    let is_dirty = repo.statuses(Some(&mut status_options))
+        .map(|s| s.len() > 0)
+        .unwrap_or(false);
+
+    let mut sync_status = if is_dirty { SyncStatus::Dirty } else { SyncStatus::Clean };
+
+    if let Some(h) = head {
+        if let Ok(local_oid) = h.target().ok_or("no target") {
+            if let Ok(upstream) = repo.branch_upstream_name(h.name().unwrap_or("HEAD")) {
+                if let Ok(upstream_obj) = repo.refname_to_id(upstream.as_str().unwrap()) {
+                    let (ahead, behind) = repo.graph_ahead_behind(local_oid, upstream_obj).unwrap_or((0, 0));
+                    if !is_dirty {
+                        if ahead > 0 && behind > 0 { sync_status = SyncStatus::Diverged; }
+                        else if ahead > 0 { sync_status = SyncStatus::Ahead; }
+                        else if behind > 0 { sync_status = SyncStatus::Behind; }
+                    }
+                }
+            }
+        }
+    }
+
+    let remote_url = repo.find_remote("origin")
+        .ok()
+        .and_then(|r| r.url().map(|u| u.to_string()));
+
+    let _ = git_path; // not needed — no CLI call here
+
+    Some(RepoMetadata {
+        name,
+        path: path_str,
+        description,
+        branch,
+        sync_status,
+        remote_url,
+        remote_reachable,
+        last_modified,
+        languages,
+        tags: vec![],
+    })
 }
 
 pub fn verify_remote_connectivity(path: &str, git_path: &str) -> bool {
