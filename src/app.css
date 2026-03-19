@@ -56,6 +56,7 @@
 
   --motion-fast: 140ms;
   --motion-std: 220ms;
+  --stagger-step: 30ms;
 
   font-size: 16px;
   line-height: 1.55;
@@ -181,6 +182,34 @@
 
 .animate-float {
   animation: float 6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes card-enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+.repo-card-enter {
+  animation: card-enter var(--motion-std) ease-out both;
+  animation-delay: calc(var(--stagger-index, 0) * var(--stagger-step, 30ms));
+}
+
+.filtering {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .filtering {
+    opacity: 0.4;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
