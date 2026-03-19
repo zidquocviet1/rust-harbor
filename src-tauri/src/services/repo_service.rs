@@ -7,57 +7,125 @@ use crate::controllers::repo::RepoCache;
 use crate::services::database::{DbPool, batch_fetch_repo_tags};
 use std::process::Command;
 
+/// Extract the integer after `keyword` in a string (e.g. "ahead 3" → 3).
+fn extract_count(s: &str, keyword: &str) -> usize {
+    s.find(keyword)
+        .and_then(|pos| {
+            s[pos + keyword.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0)
+}
+
+/// Compute sync status using `git status --porcelain --branch`.
+///
+/// This is the authoritative source — it matches exactly what the user sees
+/// in their terminal. It is a local-only operation (uses cached remote refs,
+/// no network call) and typically completes in < 10 ms.
+///
+/// Priority: Conflict > Dirty > Diverged > Ahead > Behind > NoUpstream > Clean
+fn compute_sync_status(repo: &Repository, path: &Path, git_path: &str) -> SyncStatus {
+    // 1. In-progress operations detected via .git sentinel files
+    let git_dir = repo.path();
+    if git_dir.join("MERGE_HEAD").exists()
+        || git_dir.join("CHERRY_PICK_HEAD").exists()
+        || git_dir.join("REBASE_MERGE").exists()
+        || git_dir.join("REBASE_APPLY").exists()
+    {
+        return SyncStatus::Conflict;
+    }
+
+    // 2. `git status --porcelain --branch` output format:
+    //    Line 1: ## <branch>...<upstream> [ahead N][, behind M]   (or ## No commits yet, etc.)
+    //    Rest:   XY filename  where X=index status, Y=worktree status
+    //            '??' = untracked, '!!' = ignored
+    let output = Command::new(git_path)
+        .args(["status", "--porcelain", "--branch"])
+        .current_dir(path)
+        .output();
+
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => return SyncStatus::Clean, // git unavailable / bare repo — show clean
+    };
+
+    let mut lines = stdout.lines();
+    let branch_line = match lines.next() {
+        Some(l) => l,
+        None => return SyncStatus::Clean,
+    };
+
+    // Unborn branch (repo initialised but no commits yet)
+    if branch_line.starts_with("## No commits yet") || branch_line == "## HEAD" {
+        return SyncStatus::NoUpstream;
+    }
+
+    // Detached HEAD — no upstream concept, just report dirty/clean
+    if branch_line.starts_with("## HEAD (no branch)") {
+        let is_dirty = lines.any(|l| l.len() >= 2 && !l.starts_with("??") && !l.starts_with("!!"));
+        return if is_dirty { SyncStatus::Dirty } else { SyncStatus::Clean };
+    }
+
+    let has_upstream = branch_line.contains("...");
+    // [gone] means the remote tracking branch was deleted on the remote
+    let upstream_gone = branch_line.contains("[gone]");
+    let ahead  = extract_count(branch_line, "ahead ");
+    let behind = extract_count(branch_line, "behind ");
+
+    // Dirty = any file line that is not untracked (??) or ignored (!!)
+    // This covers: staged new files (A ), staged edits (M ), unstaged edits ( M),
+    // deletions, renames — but NOT untracked files, which don't need a commit.
+    let is_dirty = lines.any(|l| l.len() >= 2 && !l.starts_with("??") && !l.starts_with("!!"));
+
+    if is_dirty {
+        return SyncStatus::Dirty;
+    }
+
+    if !has_upstream || upstream_gone {
+        return SyncStatus::NoUpstream;
+    }
+
+    match (ahead, behind) {
+        (a, b) if a > 0 && b > 0 => SyncStatus::Diverged,
+        (a, _) if a > 0          => SyncStatus::Ahead,
+        (_, b) if b > 0          => SyncStatus::Behind,
+        _                         => SyncStatus::Clean,
+    }
+}
+
 pub fn get_repo_metadata(path: &Path, git_path: &str) -> Option<RepoMetadata> {
     let repo = Repository::open(path).ok()?;
     let name = path.file_name()?.to_string_lossy().to_string();
     let path_str = path.to_string_lossy().to_string();
-    
+
     let head = repo.head().ok();
     let branch = head.as_ref()
         .and_then(|h| h.shorthand().map(|s| s.to_string()))
         .unwrap_or_else(|| "detached".to_string());
-        
+
     let last_modified = head.as_ref()
         .and_then(|h| h.peel_to_commit().ok())
         .map(|c| c.time().seconds())
         .unwrap_or(0);
-    
+
     let languages = analyze_languages(path);
     let description = get_repo_description(path);
-    
-    let mut status_options = git2::StatusOptions::new();
-    status_options.include_untracked(true);
-    let is_dirty = repo.statuses(Some(&mut status_options))
-        .map(|s| s.len() > 0)
-        .unwrap_or(false);
-    
-    let mut sync_status = if is_dirty { SyncStatus::Dirty } else { SyncStatus::Clean };
-    
-    if let Some(h) = head {
-        if let Ok(local_oid) = h.target().ok_or("no target") {
-            if let Ok(upstream) = repo.branch_upstream_name(h.name().unwrap_or("HEAD")) {
-                if let Ok(upstream_obj) = repo.refname_to_id(upstream.as_str().unwrap()) {
-                    let (ahead, behind) = repo.graph_ahead_behind(local_oid, upstream_obj).unwrap_or((0, 0));
-                    if !is_dirty {
-                        if ahead > 0 && behind > 0 { sync_status = SyncStatus::Diverged; }
-                        else if ahead > 0 { sync_status = SyncStatus::Ahead; }
-                        else if behind > 0 { sync_status = SyncStatus::Behind; }
-                    }
-                }
-            }
-        }
-    }
-    
+    let sync_status = compute_sync_status(&repo, path, git_path);
+
     let remote_url = repo.find_remote("origin")
         .ok()
         .and_then(|r| r.url().map(|u| u.to_string()));
-    
+
     let remote_reachable = if remote_url.is_some() {
         verify_remote_connectivity(&path_str, git_path)
     } else {
         false
     };
-    
+
     Some(RepoMetadata {
         name,
         path: path_str,
@@ -141,35 +209,12 @@ fn get_repo_metadata_local(path: &Path, git_path: &str, remote_reachable: bool) 
 
     let languages = analyze_languages(path);
     let description = get_repo_description(path);
-
-    let mut status_options = git2::StatusOptions::new();
-    status_options.include_untracked(true);
-    let is_dirty = repo.statuses(Some(&mut status_options))
-        .map(|s| s.len() > 0)
-        .unwrap_or(false);
-
-    let mut sync_status = if is_dirty { SyncStatus::Dirty } else { SyncStatus::Clean };
-
-    if let Some(h) = head {
-        if let Ok(local_oid) = h.target().ok_or("no target") {
-            if let Ok(upstream) = repo.branch_upstream_name(h.name().unwrap_or("HEAD")) {
-                if let Ok(upstream_obj) = repo.refname_to_id(upstream.as_str().unwrap()) {
-                    let (ahead, behind) = repo.graph_ahead_behind(local_oid, upstream_obj).unwrap_or((0, 0));
-                    if !is_dirty {
-                        if ahead > 0 && behind > 0 { sync_status = SyncStatus::Diverged; }
-                        else if ahead > 0 { sync_status = SyncStatus::Ahead; }
-                        else if behind > 0 { sync_status = SyncStatus::Behind; }
-                    }
-                }
-            }
-        }
-    }
+    // git_path is needed for `git status` — this is a local call, no network
+    let sync_status = compute_sync_status(&repo, path, git_path);
 
     let remote_url = repo.find_remote("origin")
         .ok()
         .and_then(|r| r.url().map(|u| u.to_string()));
-
-    let _ = git_path; // not needed — no CLI call here
 
     Some(RepoMetadata {
         name,

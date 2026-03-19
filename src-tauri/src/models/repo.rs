@@ -2,11 +2,20 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
 pub enum SyncStatus {
+    /// Working tree and index are clean, in sync with upstream
     Clean,
+    /// Local commits not yet pushed to upstream
     Ahead,
+    /// Uncommitted changes (staged, unstaged, or untracked files)
     Dirty,
+    /// Upstream has commits not yet pulled
     Behind,
+    /// Both local and upstream have diverged commits
     Diverged,
+    /// Branch has no remote tracking branch configured, or remote ref not fetched yet
+    NoUpstream,
+    /// In-progress merge, rebase, or cherry-pick with conflicts
+    Conflict,
 }
 
 #[derive(Debug, Serialize, Clone)]
