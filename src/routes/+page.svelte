@@ -202,6 +202,12 @@
   let collapsedGroups = $state<Set<string>>(new Set());
   let groupVisibility = $state<Record<string, boolean>>({});
   let groupObserver: IntersectionObserver | null = null;
+  let groupVisibleCount = $state<Map<string, number>>(new Map());
+  let groupBatchOffset = $state<Map<string, number>>(new Map());
+  let isFiltering = $state(false);
+  let filteringTimer: ReturnType<typeof setTimeout> | null = null;
+  let loadMoreObserver: IntersectionObserver | null = null;
+  let paginationInitialized = false;
   let viewportWidth = $state(0);
   let appConfig = $state<{
     watched_folders: string[];
@@ -565,6 +571,8 @@
   const LIST_GAP = 12;
   const GRID_ROW_HEIGHT = 360;
   const GRID_GAP = 24;
+  const PAGE_SIZE_LIST = 20;
+  const PAGE_SIZE_GRID = 9;
 
   function estimateGroupHeight(repoCount: number) {
     const rows =
@@ -574,6 +582,79 @@
     const rowHeight = viewMode === "grid" ? GRID_ROW_HEIGHT : LIST_ITEM_HEIGHT;
     const gap = viewMode === "grid" ? GRID_GAP : LIST_GAP;
     return rows * rowHeight + Math.max(0, rows - 1) * gap;
+  }
+
+  function getPageSize(): number {
+    return viewMode === "grid" ? PAGE_SIZE_GRID : PAGE_SIZE_LIST;
+  }
+
+  function initGroupCounts() {
+    const pageSize = getPageSize();
+    const next = new Map<string, number>();
+    if (groupByMode === "language") {
+      for (const key of Object.keys(groupedRepos)) {
+        next.set(key, pageSize);
+      }
+    }
+    next.set("__ungrouped__", pageSize);
+    groupVisibleCount = next;
+    groupBatchOffset = new Map();
+  }
+
+  function incrementGroupCount(key: string, total: number) {
+    const prev = groupVisibleCount.get(key) ?? getPageSize();
+    if (prev >= total) return;
+    groupBatchOffset = new Map(groupBatchOffset).set(key, prev);
+    groupVisibleCount = new Map(groupVisibleCount).set(
+      key,
+      Math.min(prev + getPageSize(), total),
+    );
+  }
+
+  function triggerFilterFade() {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (filteringTimer) clearTimeout(filteringTimer);
+    isFiltering = true;
+    filteringTimer = setTimeout(() => {
+      isFiltering = false;
+    }, 140);
+  }
+
+  function observeSentinel(
+    node: HTMLElement,
+    params: { key: string; total: number },
+  ) {
+    if (typeof window === "undefined") return;
+    if (!loadMoreObserver) {
+      loadMoreObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const key = (entry.target as HTMLElement).dataset.groupKey;
+            const total = parseInt(
+              (entry.target as HTMLElement).dataset.groupTotal ?? "0",
+              10,
+            );
+            if (!key) continue;
+            incrementGroupCount(key, total);
+          }
+        },
+        { threshold: 0.1 },
+      );
+    }
+    node.dataset.groupKey = params.key;
+    node.dataset.groupTotal = String(params.total);
+    loadMoreObserver.observe(node);
+    return {
+      update(newParams: { key: string; total: number }) {
+        node.dataset.groupKey = newParams.key;
+        node.dataset.groupTotal = String(newParams.total);
+      },
+      destroy() {
+        loadMoreObserver?.unobserve(node);
+      },
+    };
   }
 
   function observeGroup(node: HTMLElement, label: string) {
@@ -856,6 +937,25 @@
     if (unlistenEnd) unlistenEnd();
     groupObserver?.disconnect();
     groupObserver = null;
+    loadMoreObserver?.disconnect();
+    loadMoreObserver = null;
+    if (filteringTimer) clearTimeout(filteringTimer);
+  });
+
+  $effect(() => {
+    // Track all filter dependencies so this effect re-runs on any change
+    filteredRepos;
+    viewMode;
+    $activeTagFilters;
+    searchQuery;
+    selectedLanguages;
+
+    initGroupCounts();
+
+    if (paginationInitialized) {
+      triggerFilterFade();
+    }
+    paginationInitialized = true;
   });
 
   async function setGroupByMode(mode: "none" | "language") {
@@ -976,16 +1076,18 @@
 {#snippet RepoCard({
   repo,
   status,
+  staggerIndex = 0,
 }: {
   repo: RepoMetadata;
   status: { icon: typeof CheckCircle2; color: string; label: string };
+  staggerIndex?: number;
 })}
   <Card
-    class="group glass border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-[background-color,border-color,box-shadow,transform] duration-200 hover:bg-white hover:border-slate-300/90 hover:shadow-[0_10px_22px_rgba(15,23,42,0.09)] hover:-translate-y-0.5 {viewMode ===
+    class="repo-card-enter group glass border-slate-200/70 shadow-none flex flex-col rounded-[1.5rem] overflow-hidden transition-[background-color,border-color,box-shadow,transform] duration-200 hover:bg-white hover:border-slate-300/90 hover:shadow-[0_10px_22px_rgba(15,23,42,0.09)] hover:-translate-y-0.5 {viewMode ===
     'list'
       ? 'flex-row items-center py-3 px-6'
       : ''} cursor-pointer"
-    style=""
+    style="--stagger-index: {Math.min(staggerIndex, 12)}"
     onclick={(e) => {
       if ((e.target as HTMLElement).closest("button")) return;
       openPreview(repo);
@@ -1676,7 +1778,7 @@
       >
     </div>
   {:else if groupByMode === "language"}
-    <div class="space-y-6">
+    <div class="space-y-6 transition-opacity duration-[140ms]" class:filtering={isFiltering}>
       {#each Object.entries(groupedRepos) as [label, group]}
         <div use:observeGroup={label}>
           <GroupHeader
@@ -1687,16 +1789,33 @@
           >
             {#snippet children()}
               {#if groupVisibility[label]}
+                {@const visibleCount = groupVisibleCount.get(label) ?? getPageSize()}
+                {@const batchOffset = groupBatchOffset.get(label) ?? 0}
                 <div
                   class={viewMode === "grid"
                     ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-3"
                     : "space-y-3 mt-3"}
                 >
-                  {#each group as repo (repo.path)}
+                  {#each group.slice(0, visibleCount) as repo, i (repo.path)}
                     {@const status = getSyncStatusDetails(repo.sync_status)}
-                    {@render RepoCard({ repo, status })}
+                    {@render RepoCard({ repo, status, staggerIndex: Math.max(0, i - batchOffset) })}
                   {/each}
                 </div>
+                {#if visibleCount < group.length}
+                  <div
+                    use:observeSentinel={{ key: label, total: group.length }}
+                    class="h-1"
+                    aria-hidden="true"
+                  ></div>
+                  <div class="flex justify-center mt-4">
+                    <button
+                      onclick={() => incrementGroupCount(label, group.length)}
+                      class="px-5 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground border border-slate-200/80 bg-white/60 hover:bg-white rounded-xl transition-all duration-200"
+                    >
+                      Show {group.length - visibleCount} more
+                    </button>
+                  </div>
+                {/if}
               {:else}
                 <div
                   style={`height: ${estimateGroupHeight(group.length)}px;`}
@@ -1708,16 +1827,34 @@
       {/each}
     </div>
   {:else}
+    {@const ungroupedVisible = groupVisibleCount.get("__ungrouped__") ?? getPageSize()}
+    {@const ungroupedBatchOffset = groupBatchOffset.get("__ungrouped__") ?? 0}
     <div
-      class={viewMode === "grid"
-        ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-        : "space-y-3"}
+      class="{viewMode === 'grid'
+        ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+        : 'space-y-3'} transition-opacity duration-[140ms]"
+      class:filtering={isFiltering}
     >
-      {#each filteredRepos as repo (repo.path)}
+      {#each filteredRepos.slice(0, ungroupedVisible) as repo, i (repo.path)}
         {@const status = getSyncStatusDetails(repo.sync_status)}
-        {@render RepoCard({ repo, status })}
+        {@render RepoCard({ repo, status, staggerIndex: Math.max(0, i - ungroupedBatchOffset) })}
       {/each}
     </div>
+    {#if ungroupedVisible < filteredRepos.length}
+      <div
+        use:observeSentinel={{ key: "__ungrouped__", total: filteredRepos.length }}
+        class="h-1"
+        aria-hidden="true"
+      ></div>
+      <div class="flex justify-center mt-6">
+        <button
+          onclick={() => incrementGroupCount("__ungrouped__", filteredRepos.length)}
+          class="px-5 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground border border-slate-200/80 bg-white/60 hover:bg-white rounded-xl transition-all duration-200"
+        >
+          Show {filteredRepos.length - ungroupedVisible} more
+        </button>
+      </div>
+    {/if}
   {/if}
 </div>
 
