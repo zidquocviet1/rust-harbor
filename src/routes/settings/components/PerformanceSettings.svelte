@@ -37,18 +37,20 @@
     }
   }
 
-  function addPattern() {
+  async function addPattern() {
     if (newPattern && !config.exclusion_patterns.includes(newPattern)) {
       config.exclusion_patterns = [...config.exclusion_patterns, newPattern];
       newPattern = "";
+      await saveSettings();
     }
   }
 
-  function removePattern(pattern: string) {
+  async function removePattern(pattern: string) {
     if (SYSTEM_PATTERNS.includes(pattern)) return;
     config.exclusion_patterns = config.exclusion_patterns.filter(
       (p: string) => p !== pattern,
     );
+    await saveSettings();
   }
 
   onMount(loadSettings);
