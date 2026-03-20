@@ -2,7 +2,7 @@ use crate::config::load_config;
 use crate::error::Result;
 use crate::services::scanner::scan_for_repos;
 use crate::services::watcher::WatcherState;
-use crate::services::repo_service::{get_repo_metadata, update_repo_cache};
+use crate::services::repo_service::{get_repo_metadata_local, update_repo_cache, verify_remote_connectivity};
 use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags, load_repositories, save_repositories, clear_repositories};
 use crate::models::repo::RepoMetadata;
 use crate::models::editor::EditorInfo;
@@ -89,28 +89,27 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
     // Run in background and return immediately
     tokio::spawn(async move {
         let _ = app_clone.emit("scan-started", ());
-        
+
         let result = (|| -> Result<()> {
             let config = load_config(&app_clone)?;
             let cache = app_clone.state::<RepoCache>();
             let repos_paths = scan_for_repos(&config);
-            
+
             // Update the watcher
             let watcher_state = app_clone.state::<WatcherState>();
             if let Ok(mut watcher) = watcher_state.try_lock() {
                 let _ = watcher.start(app_clone.clone(), repos_paths.clone());
             }
 
-            // Parallel processing with Rayon for repos
+            // --- Phase 1: fast local metadata, no network calls ---
             let git_path_ref = &config.git_path;
             let mut processed_repos: Vec<RepoMetadata> = repos_paths.par_iter().filter_map(|path| {
-                get_repo_metadata(path, git_path_ref)
+                get_repo_metadata_local(path, git_path_ref, false)
             }).collect();
 
             // Batch-fetch tags from SQLite and merge into metadata
             let db = app_clone.state::<DbPool>();
             if let Ok(conn) = db.0.lock() {
-                // Fetch all tag assignments
                 if let Ok(tag_map) = batch_fetch_repo_tags(&conn) {
                     for repo in &mut processed_repos {
                         if let Some(tags) = tag_map.get(&repo.path) {
@@ -118,8 +117,6 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
                         }
                     }
                 }
-
-                // Cleanup orphaned repo_tags entries
                 let valid_paths: Vec<String> = processed_repos.iter().map(|r| r.path.clone()).collect();
                 let _ = cleanup_orphaned_tags(&conn, &valid_paths);
             }
@@ -129,9 +126,8 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
                 let _ = clear_repositories(&conn);
                 let _ = save_repositories(&conn, &processed_repos);
             }
-
-            for repo in processed_repos {
-                cache.0.insert(repo.path.clone(), repo);
+            for repo in &processed_repos {
+                cache.0.insert(repo.path.clone(), repo.clone());
             }
             Ok(())
         })();
@@ -140,9 +136,52 @@ pub async fn refresh_repos(app: AppHandle) -> Result<()> {
             eprintln!("Background refresh failed: {:?}", e);
         }
 
+        // Phase 1 done — UI can display repos immediately
         let status = app_clone.state::<ScanStatus>();
         status.0.store(false, Ordering::SeqCst);
         let _ = app_clone.emit("scan-completed", ());
+
+        // --- Phase 2: background connectivity check (non-blocking for the UI) ---
+        let app_phase2 = app_clone.clone();
+        tokio::task::spawn_blocking(move || {
+            let cache = app_phase2.state::<RepoCache>();
+            let db = app_phase2.state::<DbPool>();
+            let git_path = load_config(&app_phase2)
+                .map(|c| c.git_path)
+                .unwrap_or_else(|_| "git".to_string());
+
+            // Collect repos that have a remote URL — only these need a connectivity check
+            let repos_with_remote: Vec<String> = cache.0.iter()
+                .filter(|r| r.value().remote_url.is_some())
+                .map(|r| r.key().clone())
+                .collect();
+
+            if repos_with_remote.is_empty() {
+                return;
+            }
+
+            // Tell the UI which repos are about to be checked
+            let _ = app_phase2.emit("connectivity-check-started", &repos_with_remote);
+
+            repos_with_remote.par_iter().for_each(|path_str| {
+                let reachable = verify_remote_connectivity(path_str, &git_path);
+                if let Some(mut entry) = cache.0.get_mut(path_str) {
+                    entry.remote_reachable = reachable;
+                }
+            });
+
+            // Persist all updated reachability values in one batch
+            let updated: Vec<RepoMetadata> = repos_with_remote.iter()
+                .filter_map(|p| cache.0.get(p).map(|e| e.clone()))
+                .collect();
+            if let Ok(conn) = db.0.lock() {
+                let _ = save_repositories(&conn, &updated);
+            }
+
+            // Signal completion — single event avoids N re-renders in the UI
+            let _ = app_phase2.emit("connectivity-check-completed", ());
+            let _ = app_phase2.emit("repo-state-changed", ());
+        });
     });
 
     Ok(())

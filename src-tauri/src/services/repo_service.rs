@@ -192,7 +192,7 @@ pub fn update_repo_cache_local(app: &AppHandle, path_str: &str) {
 
 /// Same as `get_repo_metadata` but accepts a pre-computed `remote_reachable` value
 /// instead of making a live network call.
-fn get_repo_metadata_local(path: &Path, git_path: &str, remote_reachable: bool) -> Option<RepoMetadata> {
+pub fn get_repo_metadata_local(path: &Path, git_path: &str, remote_reachable: bool) -> Option<RepoMetadata> {
     let repo = Repository::open(path).ok()?;
     let name = path.file_name()?.to_string_lossy().to_string();
     let path_str = path.to_string_lossy().to_string();
@@ -231,15 +231,19 @@ fn get_repo_metadata_local(path: &Path, git_path: &str, remote_reachable: bool) 
 }
 
 pub fn verify_remote_connectivity(path: &str, git_path: &str) -> bool {
-    let output = Command::new(git_path)
-        .args(&["ls-remote", "--exit-code", "--heads", "origin"])
-        .current_dir(path)
-        .output();
-        
-    match output {
-        Ok(out) => out.status.success(),
-        Err(_) => false,
-    }
+    let path = path.to_string();
+    let git_path = git_path.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = Command::new(&git_path)
+            .args(&["ls-remote", "--exit-code", "--heads", "origin"])
+            .current_dir(&path)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        let _ = tx.send(result);
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or(false)
 }
 
 pub fn get_repo_description(path: &Path) -> Option<String> {
@@ -319,8 +323,7 @@ pub fn get_repo_description(path: &Path) -> Option<String> {
 }
 
 pub fn analyze_languages(path: &Path) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    let extensions = [
+    let ext_map: HashMap<&str, &str> = [
         ("rs", "Rust"), ("js", "JavaScript"), ("ts", "TypeScript"),
         ("py", "Python"), ("go", "Go"), ("cpp", "C++"), ("hpp", "C++"), ("cc", "C++"),
         ("c", "C"), ("h", "C"), ("java", "Java"), ("swift", "Swift"),
@@ -329,16 +332,18 @@ pub fn analyze_languages(path: &Path) -> HashMap<String, usize> {
         ("vue", "Vue"), ("sh", "Shell"), ("sql", "SQL"), ("yaml", "YAML"), ("yml", "YAML"),
         ("cs", "C#"), ("scala", "Scala"), ("dart", "Dart"), ("ex", "Elixir"),
         ("exs", "Elixir"), ("erl", "Erlang"), ("clj", "Clojure"),
-    ];
+    ].iter().cloned().collect();
+
+    let mut counts = HashMap::new();
 
     let walker = walkdir::WalkDir::new(path)
-        .max_depth(10)
+        .max_depth(3)
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
-            !name.starts_with('.') && 
-            name != "node_modules" && 
-            name != "target" && 
+            !name.starts_with('.') &&
+            name != "node_modules" &&
+            name != "target" &&
             name != "build" &&
             name != "dist" &&
             name != "vendor"
@@ -347,10 +352,8 @@ pub fn analyze_languages(path: &Path) -> HashMap<String, usize> {
     for entry in walker.flatten() {
         if entry.file_type().is_file() {
             if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
-                for (e, lang) in extensions {
-                    if ext == e {
-                        *counts.entry(lang.to_string()).or_insert(0) += 1;
-                    }
+                if let Some(&lang) = ext_map.get(ext) {
+                    *counts.entry(lang.to_string()).or_insert(0) += 1;
                 }
             }
         }

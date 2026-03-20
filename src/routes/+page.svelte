@@ -37,6 +37,7 @@
     Globe,
     LayoutGrid,
     LayoutList,
+    Loader2,
     RefreshCw,
     Search,
     Tag,
@@ -81,7 +82,7 @@
     siYaml,
     siZig,
   } from "simple-icons";
-  import { onDestroy, onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import { cubicOut } from "svelte/easing";
   import { fade, fly } from "svelte/transition";
@@ -195,6 +196,10 @@
   let unlistenState: UnlistenFn;
   let unlistenStart: UnlistenFn;
   let unlistenEnd: UnlistenFn;
+  let unlistenConnStart: UnlistenFn;
+  let unlistenConnEnd: UnlistenFn;
+  let repoStateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let isCheckingConnectivity = $state(false);
   let tagPopoverRepo: RepoMetadata | null = $state(null);
   let tagPopoverOpen = $state(false);
   let tagPopoverPosition = $state<{ top: number; left: number } | null>(null);
@@ -921,7 +926,13 @@
       console.error("Failed to read scanning state:", e);
       isScanning = false;
     }
-    unlistenState = await listen("repo-state-changed", () => loadRepos());
+    unlistenState = await listen("repo-state-changed", () => {
+      if (repoStateDebounceTimer) clearTimeout(repoStateDebounceTimer);
+      repoStateDebounceTimer = setTimeout(async () => {
+        await loadRepos();
+        isCheckingConnectivity = false;
+      }, 300);
+    });
     unlistenStart = await listen("scan-started", () => {
       isScanning = true;
     });
@@ -929,12 +940,27 @@
       isScanning = false;
       loadRepos();
     });
+    unlistenConnStart = await listen("connectivity-check-started", () => {
+      isCheckingConnectivity = true;
+    });
+    unlistenConnEnd = await listen("connectivity-check-completed", () => {
+      // isCheckingConnectivity is cleared after loadRepos() in repo-state-changed,
+      // but use this as a fallback in case repo-state-changed is debounced away.
+      if (repoStateDebounceTimer) clearTimeout(repoStateDebounceTimer);
+      repoStateDebounceTimer = setTimeout(async () => {
+        await loadRepos();
+        isCheckingConnectivity = false;
+      }, 300);
+    });
   });
 
   onDestroy(() => {
+    if (repoStateDebounceTimer) clearTimeout(repoStateDebounceTimer);
     if (unlistenState) unlistenState();
     if (unlistenStart) unlistenStart();
     if (unlistenEnd) unlistenEnd();
+    if (unlistenConnStart) unlistenConnStart();
+    if (unlistenConnEnd) unlistenConnEnd();
     groupObserver?.disconnect();
     groupObserver = null;
     loadMoreObserver?.disconnect();
@@ -943,14 +969,16 @@
   });
 
   $effect(() => {
-    // Track all filter dependencies so this effect re-runs on any change
-    filteredRepos;
+    // Track only user-driven filter/view state — NOT repos data.
+    // Using untrack() for initGroupCounts() prevents repos/$filteredRepos/$groupedRepos
+    // from being registered as dependencies, so a background data refresh won't reset
+    // pagination and cause a scroll-to-top.
     viewMode;
     $activeTagFilters;
     searchQuery;
     selectedLanguages;
 
-    initGroupCounts();
+    untrack(() => initGroupCounts());
 
     if (paginationInitialized) {
       triggerFilterFade();
@@ -1214,15 +1242,25 @@
             {formatRelativeTime(repo.last_modified)}
           </Badge>
           {#if repo.remote_url}
-            <Badge
-              variant="outline"
-              class="bg-white/80 border-slate-200/70 text-[10px] px-3 py-1 rounded-full font-bold {repo.remote_reachable
-                ? 'text-emerald-500'
-                : 'text-amber-500 opacity-80'}"
-            >
-              <Globe class="w-3 h-3 mr-1.5" />
-              {repo.remote_reachable ? "Connected" : "Unreachable"}
-            </Badge>
+            {#if isCheckingConnectivity}
+              <Badge
+                variant="outline"
+                class="bg-white/80 border-blue-200/70 text-[10px] px-3 py-1 rounded-full font-bold text-blue-400"
+              >
+                <Loader2 class="w-3 h-3 mr-1.5 animate-spin" />
+                Checking...
+              </Badge>
+            {:else}
+              <Badge
+                variant="outline"
+                class="bg-white/80 border-slate-200/70 text-[10px] px-3 py-1 rounded-full font-bold {repo.remote_reachable
+                  ? 'text-emerald-500'
+                  : 'text-amber-500 opacity-80'}"
+              >
+                <Globe class="w-3 h-3 mr-1.5" />
+                {repo.remote_reachable ? "Connected" : "Unreachable"}
+              </Badge>
+            {/if}
           {/if}
         </div>
 
@@ -1408,6 +1446,31 @@
               >{formatRelativeTime(repo.last_modified)}</span
             >
           </div>
+          {#if repo.remote_url}
+            <div class="w-28 flex flex-col items-center gap-1">
+              <span
+                class="text-[11px] uppercase tracking-[0.2em] font-black text-muted-foreground"
+                >Remote</span
+              >
+              {#if isCheckingConnectivity}
+                <div class="flex items-center space-x-1 text-blue-400">
+                  <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                  <span class="text-sm font-bold tracking-tight">Checking</span>
+                </div>
+              {:else}
+                <div
+                  class="flex items-center space-x-1.5 {repo.remote_reachable
+                    ? 'text-emerald-500'
+                    : 'text-amber-500'}"
+                >
+                  <Globe class="w-3.5 h-3.5" />
+                  <span class="text-sm font-bold tracking-tight"
+                    >{repo.remote_reachable ? "Online" : "Offline"}</span
+                  >
+                </div>
+              {/if}
+            </div>
+          {/if}
         </div>
 
         <div class="flex items-center space-x-2 flex-shrink-0 relative">
@@ -1728,9 +1791,11 @@
           onclick={refreshRepos}
           disabled={isScanning}
         >
-          <RefreshCw
-            class="w-4 h-4 {isScanning ? 'animate-spin text-primary' : ''}"
-          />
+          {#if isScanning}
+            <Loader2 class="size-4 animate-spin text-primary" />
+          {:else}
+            <RefreshCw class="size-4" />
+          {/if}
         </Button>
       </div>
     </div>
