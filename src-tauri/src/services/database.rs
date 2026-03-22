@@ -70,6 +70,37 @@ pub fn init_database(app_handle: &tauri::AppHandle) -> crate::error::Result<DbPo
     )
     .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
 
+    // Create pull_history table — persists permanently, independent of watchlist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pull_history (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_path          TEXT    NOT NULL,
+            repo_name          TEXT    NOT NULL,
+            branch             TEXT    NOT NULL,
+            pulled_at          INTEGER NOT NULL,
+            commit_before      TEXT    NOT NULL,
+            commit_after       TEXT    NOT NULL,
+            files_changed_count INTEGER NOT NULL DEFAULT 0
+        )",
+        [],
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    // Create pull_history_files table — per-file diff records for each pull event
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pull_history_files (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            pull_id      INTEGER NOT NULL REFERENCES pull_history(id) ON DELETE CASCADE,
+            file_path    TEXT    NOT NULL,
+            change_type  TEXT    NOT NULL,
+            additions    INTEGER NOT NULL DEFAULT 0,
+            deletions    INTEGER NOT NULL DEFAULT 0,
+            diff_content TEXT    NOT NULL DEFAULT ''
+        )",
+        [],
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
     // Ensure foreign keys are enforced
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
@@ -216,6 +247,156 @@ pub fn clear_repositories(conn: &Connection) -> crate::error::Result<()> {
     conn.execute("DELETE FROM repositories", [])
         .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
     Ok(())
+}
+
+// ─── Pull History ────────────────────────────────────────────────────────────
+
+/// Inserts a pull history record and all its file records in a single transaction.
+pub fn insert_pull_history(
+    conn: &Connection,
+    entry: &crate::models::pull_history::NewPullHistory,
+) -> crate::error::Result<i64> {
+    conn.execute(
+        "INSERT INTO pull_history (repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![
+            entry.repo_path,
+            entry.repo_name,
+            entry.branch,
+            entry.pulled_at,
+            entry.commit_before,
+            entry.commit_after,
+            entry.files.len() as i64,
+        ],
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let pull_id = conn.last_insert_rowid();
+
+    for file in &entry.files {
+        conn.execute(
+            "INSERT INTO pull_history_files (pull_id, file_path, change_type, additions, deletions, diff_content)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                pull_id,
+                file.file_path,
+                file.change_type,
+                file.additions,
+                file.deletions,
+                file.diff_content,
+            ],
+        )
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    }
+
+    Ok(pull_id)
+}
+
+/// Returns pull history entries ordered by pulled_at DESC, optionally filtered by repo_path.
+pub fn get_pull_history(
+    conn: &Connection,
+    repo_path: Option<&str>,
+) -> crate::error::Result<Vec<crate::models::pull_history::PullHistoryEntry>> {
+    let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match repo_path {
+        Some(path) => (
+            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count
+             FROM pull_history WHERE repo_path = ?1 ORDER BY pulled_at DESC".to_string(),
+            vec![Box::new(path.to_string())],
+        ),
+        None => (
+            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count
+             FROM pull_history ORDER BY pulled_at DESC".to_string(),
+            vec![],
+        ),
+    };
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    let params: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+
+    let rows = stmt
+        .query_map(params.as_slice(), |row| {
+            Ok(crate::models::pull_history::PullHistoryEntry {
+                id: row.get(0)?,
+                repo_path: row.get(1)?,
+                repo_name: row.get(2)?,
+                branch: row.get(3)?,
+                pulled_at: row.get(4)?,
+                commit_before: row.get(5)?,
+                commit_after: row.get(6)?,
+                files_changed_count: row.get(7)?,
+            })
+        })
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row.map_err(|e| crate::error::Error::DbError(e.to_string()))?);
+    }
+    Ok(entries)
+}
+
+/// Returns all file records for a given pull history entry.
+pub fn get_pull_history_detail(
+    conn: &Connection,
+    pull_id: i64,
+) -> crate::error::Result<Vec<crate::models::pull_history::PullHistoryFile>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, pull_id, file_path, change_type, additions, deletions, diff_content
+             FROM pull_history_files WHERE pull_id = ?1 ORDER BY file_path",
+        )
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![pull_id], |row| {
+            Ok(crate::models::pull_history::PullHistoryFile {
+                id: row.get(0)?,
+                pull_id: row.get(1)?,
+                file_path: row.get(2)?,
+                change_type: row.get(3)?,
+                additions: row.get(4)?,
+                deletions: row.get(5)?,
+                diff_content: row.get(6)?,
+            })
+        })
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let mut files = Vec::new();
+    for row in rows {
+        files.push(row.map_err(|e| crate::error::Error::DbError(e.to_string()))?);
+    }
+    Ok(files)
+}
+
+/// Deletes a single pull history entry and cascades to its file records.
+pub fn delete_pull_history_entry(conn: &Connection, pull_id: i64) -> crate::error::Result<()> {
+    conn.execute("DELETE FROM pull_history WHERE id = ?1", rusqlite::params![pull_id])
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    Ok(())
+}
+
+/// Deletes multiple pull history entries by ID.
+pub fn delete_pull_history_entries(conn: &Connection, pull_ids: &[i64]) -> crate::error::Result<()> {
+    for id in pull_ids {
+        conn.execute("DELETE FROM pull_history WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Deletes all pull history records from both tables.
+pub fn clear_pull_history(conn: &Connection) -> crate::error::Result<()> {
+    conn.execute("DELETE FROM pull_history_files", [])
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    conn.execute("DELETE FROM pull_history", [])
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    Ok(())
+}
+
+/// Returns the total count of pull history entries.
+pub fn get_pull_history_count(conn: &Connection) -> crate::error::Result<i64> {
+    conn.query_row("SELECT COUNT(*) FROM pull_history", [], |r| r.get(0))
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))
 }
 
 #[cfg(test)]
