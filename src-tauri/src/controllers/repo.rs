@@ -3,9 +3,10 @@ use crate::error::Result;
 use crate::services::scanner::scan_for_repos;
 use crate::services::watcher::WatcherState;
 use crate::services::repo_service::{get_repo_metadata_local, update_repo_cache, verify_remote_connectivity};
-use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags, load_repositories, save_repositories, clear_repositories};
+use crate::services::database::{DbPool, cleanup_orphaned_tags, batch_fetch_repo_tags, load_repositories, save_repositories, clear_repositories, insert_pull_history};
 use crate::models::repo::RepoMetadata;
 use crate::models::editor::EditorInfo;
+use crate::models::pull_history::{NewPullHistory, NewPullHistoryFile, PullResult};
 use crate::services::editor::{get_installed_editors as check_editors, open_path_in_editor};
 use tauri::{AppHandle, Manager, Emitter};
 use serde::Serialize;
@@ -235,11 +236,196 @@ pub async fn git_fetch(app: AppHandle, path: String) -> Result<String> {
 }
 
 #[tauri::command]
-pub async fn git_pull(app: AppHandle, path: String) -> Result<String> {
+pub async fn git_pull(app: AppHandle, path: String) -> Result<PullResult> {
     let config = load_config(&app)?;
-    let result = execute_git_command(path.clone(), &["pull", "origin", "HEAD"], &config.git_path)?;
+    let git = &config.git_path;
+
+    // 3.1 Capture HEAD SHA before pull
+    let commit_before = execute_git_command(path.clone(), &["rev-parse", "HEAD"], git)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    // Run the pull
+    let output = execute_git_command(path.clone(), &["pull", "origin", "HEAD"], git)?;
+
+    // 3.2 Capture HEAD SHA after pull
+    let commit_after = execute_git_command(path.clone(), &["rev-parse", "HEAD"], git)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
     update_repo_cache(&app, &path);
-    Ok(result)
+
+    // 3.3 If SHAs are identical, no new commits — skip history
+    if commit_before.is_empty() || commit_before == commit_after {
+        return Ok(PullResult { output, history_id: None });
+    }
+
+    // 3.4 Run --numstat to get per-file stats
+    let diff_range = format!("{}..{}", commit_before, commit_after);
+    let numstat_output = execute_git_command(
+        path.clone(),
+        &["diff", &diff_range, "--numstat"],
+        git,
+    ).unwrap_or_default();
+
+    // 3.5 Run full unified diff
+    let full_diff = execute_git_command(
+        path.clone(),
+        &["diff", &diff_range, "--unified=3"],
+        git,
+    ).unwrap_or_default();
+
+    // 3.4 Parse numstat lines into file stat records
+    // Format: "<additions>\t<deletions>\t<filepath>"  (binary: "-\t-\t<filepath>")
+    let file_stats: Vec<(String, i64, i64)> = numstat_output
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(3, '\t').collect();
+            if parts.len() < 3 { return None; }
+            let (add_str, del_str, filepath) = (parts[0], parts[1], parts[2]);
+            // 3.6 Handle binary files
+            let additions: i64 = add_str.parse().unwrap_or(0);
+            let deletions: i64 = del_str.parse().unwrap_or(0);
+            Some((filepath.to_string(), additions, deletions))
+        })
+        .collect();
+
+    // Split full diff into per-file sections by "diff --git" headers
+    let file_diffs = split_diff_by_file(&full_diff);
+
+    // 3.8 Determine change_type from numstat / diff headers
+    // "new file mode" → added, "deleted file mode" → deleted, "rename" → renamed, else → modified
+    let change_type_map = detect_change_types(&full_diff);
+
+    // 3.7 Build NewPullHistoryFile entries, capping diff_content at 500KB
+    const MAX_DIFF_BYTES: usize = 500 * 1024;
+    let files: Vec<NewPullHistoryFile> = file_stats
+        .into_iter()
+        .map(|(file_path, additions, deletions)| {
+            let change_type = change_type_map
+                .get(&file_path)
+                .cloned()
+                .unwrap_or_else(|| "modified".to_string());
+
+            let raw_diff = file_diffs.get(&file_path).cloned().unwrap_or_default();
+            let diff_content = if change_type == "binary" || (additions == 0 && deletions == 0 && raw_diff.is_empty()) {
+                "[binary file]".to_string()
+            } else if raw_diff.len() > MAX_DIFF_BYTES {
+                format!("{}\n[diff truncated]", &raw_diff[..MAX_DIFF_BYTES])
+            } else {
+                raw_diff
+            };
+
+            NewPullHistoryFile {
+                file_path,
+                change_type,
+                additions,
+                deletions,
+                diff_content,
+            }
+        })
+        .collect();
+
+    // 3.9 Determine branch name
+    let branch = execute_git_command(path.clone(), &["rev-parse", "--abbrev-ref", "HEAD"], git)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    // Determine repo name from path
+    let repo_name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let new_history = NewPullHistory {
+        repo_path: path.clone(),
+        repo_name,
+        branch,
+        pulled_at: chrono::Utc::now().timestamp(),
+        commit_before,
+        commit_after,
+        files,
+    };
+
+    // 3.9 Persist — best-effort, do not fail the pull on error
+    let history_id = if let Some(db) = app.try_state::<DbPool>() {
+        match db.0.lock() {
+            Ok(conn) => match insert_pull_history(&conn, &new_history) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    eprintln!("[pull-history] Failed to insert history: {:?}", e);
+                    None
+                }
+            },
+            Err(e) => {
+                eprintln!("[pull-history] Failed to lock DB: {:?}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    Ok(PullResult { output, history_id })
+}
+
+/// Splits a unified diff string into a map of file_path → diff_section.
+fn split_diff_by_file(full_diff: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let mut current_file: Option<String> = None;
+    let mut current_lines: Vec<&str> = Vec::new();
+
+    for line in full_diff.lines() {
+        if line.starts_with("diff --git ") {
+            // Flush previous file
+            if let Some(file) = current_file.take() {
+                map.insert(file, current_lines.join("\n"));
+            }
+            current_lines.clear();
+            // Parse "diff --git a/<path> b/<path>"
+            // Take the b/ path (after-pull version)
+            if let Some(b_part) = line.split(" b/").nth(1) {
+                current_file = Some(b_part.to_string());
+            }
+        }
+        current_lines.push(line);
+    }
+    if let Some(file) = current_file {
+        map.insert(file, current_lines.join("\n"));
+    }
+    map
+}
+
+/// Detects change_type for each file from diff headers.
+fn detect_change_types(full_diff: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let mut current_file: Option<String> = None;
+    let mut change_type = "modified".to_string();
+
+    for line in full_diff.lines() {
+        if line.starts_with("diff --git ") {
+            if let Some(file) = current_file.take() {
+                map.insert(file, change_type.clone());
+            }
+            change_type = "modified".to_string();
+            if let Some(b_part) = line.split(" b/").nth(1) {
+                current_file = Some(b_part.to_string());
+            }
+        } else if line.starts_with("new file mode") {
+            change_type = "added".to_string();
+        } else if line.starts_with("deleted file mode") {
+            change_type = "deleted".to_string();
+        } else if line.starts_with("rename ") || line.starts_with("similarity index") {
+            change_type = "renamed".to_string();
+        } else if line.contains("Binary files") {
+            change_type = "binary".to_string();
+        }
+    }
+    if let Some(file) = current_file {
+        map.insert(file, change_type);
+    }
+    map
 }
 
 #[tauri::command]
