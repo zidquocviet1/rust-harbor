@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
   import GroupHeader from "$lib/components/custom/GroupHeader.svelte";
   import OpenInEditor from "$lib/components/custom/OpenInEditor.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Card, CardContent } from "$lib/components/ui/card";
+  import { notifyNewPull, type PullResult } from "$lib/stores/pullHistoryStore";
   import {
     activeTagFilters,
     allTags,
@@ -846,6 +848,36 @@
   ) {
     const key = `${repo.path}-${action}`;
     actionLoading[key] = action;
+
+    if (action === "pull") {
+      // Pull returns PullResult — handle separately to capture history_id
+      try {
+        const result = await invoke<PullResult>("git_pull", {
+          path: repo.path,
+        });
+        loadRepos();
+        notifyNewPull(result.history_id); // 9.3: increment unread badge if new history
+        if (result.history_id !== null) {
+          // 10.2: toast with "View diff →" link
+          toast.success(`Git pull successful`, {
+            action: {
+              label: "View diff →",
+              onClick: () => goto("/pull-history"),
+            },
+          });
+        } else {
+          toast.success(`Git pull successful`);
+        }
+      } catch (e: any) {
+        toast.error(
+          `Git pull failed: ${typeof e === "string" ? e : e.GitError || e.IoError || "Unknown error"}`,
+        );
+      } finally {
+        delete actionLoading[key];
+      }
+      return;
+    }
+
     const promise = invoke<string>(`git_${action}`, { path: repo.path });
     toast.promise(promise, {
       loading: `Git ${action}ing ${repo.name}...`,
@@ -1843,7 +1875,10 @@
       >
     </div>
   {:else if groupByMode === "language"}
-    <div class="space-y-6 transition-opacity duration-[140ms]" class:filtering={isFiltering}>
+    <div
+      class="space-y-6 transition-opacity duration-[140ms]"
+      class:filtering={isFiltering}
+    >
       {#each Object.entries(groupedRepos) as [label, group]}
         <div use:observeGroup={label}>
           <GroupHeader
@@ -1854,7 +1889,8 @@
           >
             {#snippet children()}
               {#if groupVisibility[label]}
-                {@const visibleCount = groupVisibleCount.get(label) ?? getPageSize()}
+                {@const visibleCount =
+                  groupVisibleCount.get(label) ?? getPageSize()}
                 {@const batchOffset = groupBatchOffset.get(label) ?? 0}
                 <div
                   class={viewMode === "grid"
@@ -1863,7 +1899,11 @@
                 >
                   {#each group.slice(0, visibleCount) as repo, i (repo.path)}
                     {@const status = getSyncStatusDetails(repo.sync_status)}
-                    {@render RepoCard({ repo, status, staggerIndex: Math.max(0, i - batchOffset) })}
+                    {@render RepoCard({
+                      repo,
+                      status,
+                      staggerIndex: Math.max(0, i - batchOffset),
+                    })}
                   {/each}
                 </div>
                 {#if visibleCount < group.length}
@@ -1892,7 +1932,8 @@
       {/each}
     </div>
   {:else}
-    {@const ungroupedVisible = groupVisibleCount.get("__ungrouped__") ?? getPageSize()}
+    {@const ungroupedVisible =
+      groupVisibleCount.get("__ungrouped__") ?? getPageSize()}
     {@const ungroupedBatchOffset = groupBatchOffset.get("__ungrouped__") ?? 0}
     <div
       class="{viewMode === 'grid'
@@ -1902,18 +1943,26 @@
     >
       {#each filteredRepos.slice(0, ungroupedVisible) as repo, i (repo.path)}
         {@const status = getSyncStatusDetails(repo.sync_status)}
-        {@render RepoCard({ repo, status, staggerIndex: Math.max(0, i - ungroupedBatchOffset) })}
+        {@render RepoCard({
+          repo,
+          status,
+          staggerIndex: Math.max(0, i - ungroupedBatchOffset),
+        })}
       {/each}
     </div>
     {#if ungroupedVisible < filteredRepos.length}
       <div
-        use:observeSentinel={{ key: "__ungrouped__", total: filteredRepos.length }}
+        use:observeSentinel={{
+          key: "__ungrouped__",
+          total: filteredRepos.length,
+        }}
         class="h-1"
         aria-hidden="true"
       ></div>
       <div class="flex justify-center mt-6">
         <button
-          onclick={() => incrementGroupCount("__ungrouped__", filteredRepos.length)}
+          onclick={() =>
+            incrementGroupCount("__ungrouped__", filteredRepos.length)}
           class="px-5 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground border border-slate-200/80 bg-white/60 hover:bg-white rounded-xl transition-all duration-200"
         >
           Show {filteredRepos.length - ungroupedVisible} more

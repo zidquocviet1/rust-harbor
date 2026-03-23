@@ -3,6 +3,7 @@
   import GitMissingError from "$lib/components/custom/GitMissingError.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
   import { APP_BRANDING } from "$lib/config/branding";
+  import { unreadCount } from "$lib/stores/pullHistoryStore";
   import {
     allTags,
     createTag,
@@ -257,6 +258,43 @@
             >
             <span class="font-medium">Repository List</span>
           </a>
+
+          <!-- Pull History nav item (9.1 + 9.2) -->
+          <a
+            href="/pull-history"
+            class="sidebar-item flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group {page
+              .url.pathname === '/pull-history'
+              ? 'bg-primary/12 text-primary border border-primary/30 shadow-sm shadow-primary/20'
+              : 'hover:bg-slate-100/80 text-muted-foreground border border-transparent hover:border-slate-200/80'}"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="group-hover:text-primary transition-colors"
+              ><circle cx="18" cy="18" r="3" /><circle
+                cx="6"
+                cy="6"
+                r="3"
+              /><path d="M13 6h3a2 2 0 0 1 2 2v7" /><path
+                d="M11 18H8a2 2 0 0 1-2-2V9"
+              /><polyline points="11 15 8 18 11 21" /></svg
+            >
+            <span class="font-medium flex-1">Pull History</span>
+            {#if $unreadCount > 0}
+              <span
+                class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold text-white"
+                style="background: var(--color-primary);">{$unreadCount}</span
+              >
+            {/if}
+          </a>
+
           <a
             href="/settings"
             class="sidebar-item flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-200 group {page

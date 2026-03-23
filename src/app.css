@@ -111,6 +111,10 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
+  input, select, textarea, button {
+    font-family: inherit;
+  }
+
   h1, h2, h3, h4 {
     font-family: var(--font-display);
     @apply tracking-tight text-[color:var(--text-primary)];
