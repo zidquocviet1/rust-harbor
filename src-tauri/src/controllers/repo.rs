@@ -338,6 +338,34 @@ pub async fn git_pull(app: AppHandle, path: String) -> Result<PullResult> {
         .unwrap_or("unknown")
         .to_string();
 
+    // Capture date + message + author for each commit in one git log call.
+    // Format: "<unix-timestamp>\x00<subject>\x00<author-name>"
+    fn parse_commit_info(raw: &str) -> (Option<i64>, Option<String>, Option<String>) {
+        let parts: Vec<&str> = raw.splitn(3, '\x00').collect();
+        let date = parts.first().and_then(|s| s.trim().parse::<i64>().ok());
+        let message = parts.get(1).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let author = parts.get(2).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        (date, message, author)
+    }
+
+    let before_info = execute_git_command(
+        path.clone(),
+        &["log", "-1", "--format=%ct%x00%s%x00%an", &commit_before],
+        git,
+    )
+    .unwrap_or_default();
+    let (commit_before_date, commit_before_message, commit_before_author) =
+        parse_commit_info(&before_info);
+
+    let after_info = execute_git_command(
+        path.clone(),
+        &["log", "-1", "--format=%ct%x00%s%x00%an", &commit_after],
+        git,
+    )
+    .unwrap_or_default();
+    let (commit_after_date, commit_after_message, commit_after_author) =
+        parse_commit_info(&after_info);
+
     let new_history = NewPullHistory {
         repo_path: path.clone(),
         repo_name,
@@ -345,6 +373,12 @@ pub async fn git_pull(app: AppHandle, path: String) -> Result<PullResult> {
         pulled_at: chrono::Utc::now().timestamp(),
         commit_before,
         commit_after,
+        commit_before_date,
+        commit_after_date,
+        commit_before_message,
+        commit_before_author,
+        commit_after_message,
+        commit_after_author,
         files,
     };
 

@@ -120,10 +120,12 @@ pub fn run() {
             repo::open_in_editor,
             pull_history::list_pull_history,
             pull_history::get_pull_detail,
+            pull_history::get_file_diff,
             pull_history::remove_pull_history_entry,
             pull_history::remove_pull_history_entries,
             pull_history::clear_all_pull_history,
             pull_history::pull_history_count,
+            pull_history::get_pull_history_storage_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

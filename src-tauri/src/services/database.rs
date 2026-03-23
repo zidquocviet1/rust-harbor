@@ -73,18 +73,32 @@ pub fn init_database(app_handle: &tauri::AppHandle) -> crate::error::Result<DbPo
     // Create pull_history table — persists permanently, independent of watchlist
     conn.execute(
         "CREATE TABLE IF NOT EXISTS pull_history (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            repo_path          TEXT    NOT NULL,
-            repo_name          TEXT    NOT NULL,
-            branch             TEXT    NOT NULL,
-            pulled_at          INTEGER NOT NULL,
-            commit_before      TEXT    NOT NULL,
-            commit_after       TEXT    NOT NULL,
-            files_changed_count INTEGER NOT NULL DEFAULT 0
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_path             TEXT    NOT NULL,
+            repo_name             TEXT    NOT NULL,
+            branch                TEXT    NOT NULL,
+            pulled_at             INTEGER NOT NULL,
+            commit_before         TEXT    NOT NULL,
+            commit_after          TEXT    NOT NULL,
+            files_changed_count   INTEGER NOT NULL DEFAULT 0,
+            commit_before_date    INTEGER,
+            commit_after_date     INTEGER,
+            commit_before_message TEXT,
+            commit_before_author  TEXT,
+            commit_after_message  TEXT,
+            commit_after_author   TEXT
         )",
         [],
     )
     .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    // Migration: add new columns to existing databases (ignored if already present)
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_before_date INTEGER", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_after_date INTEGER", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_before_message TEXT", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_before_author TEXT", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_after_message TEXT", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_after_author TEXT", []);
 
     // Create pull_history_files table — per-file diff records for each pull event
     conn.execute(
@@ -257,8 +271,8 @@ pub fn insert_pull_history(
     entry: &crate::models::pull_history::NewPullHistory,
 ) -> crate::error::Result<i64> {
     conn.execute(
-        "INSERT INTO pull_history (repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO pull_history (repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         rusqlite::params![
             entry.repo_path,
             entry.repo_name,
@@ -267,6 +281,12 @@ pub fn insert_pull_history(
             entry.commit_before,
             entry.commit_after,
             entry.files.len() as i64,
+            entry.commit_before_date,
+            entry.commit_after_date,
+            entry.commit_before_message,
+            entry.commit_before_author,
+            entry.commit_after_message,
+            entry.commit_after_author,
         ],
     )
     .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
@@ -299,12 +319,12 @@ pub fn get_pull_history(
 ) -> crate::error::Result<Vec<crate::models::pull_history::PullHistoryEntry>> {
     let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match repo_path {
         Some(path) => (
-            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count
+            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author
              FROM pull_history WHERE repo_path = ?1 ORDER BY pulled_at DESC".to_string(),
             vec![Box::new(path.to_string())],
         ),
         None => (
-            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count
+            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author
              FROM pull_history ORDER BY pulled_at DESC".to_string(),
             vec![],
         ),
@@ -324,6 +344,12 @@ pub fn get_pull_history(
                 commit_before: row.get(5)?,
                 commit_after: row.get(6)?,
                 files_changed_count: row.get(7)?,
+                commit_before_date: row.get(8)?,
+                commit_after_date: row.get(9)?,
+                commit_before_message: row.get(10)?,
+                commit_before_author: row.get(11)?,
+                commit_after_message: row.get(12)?,
+                commit_after_author: row.get(13)?,
             })
         })
         .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
@@ -335,7 +361,7 @@ pub fn get_pull_history(
     Ok(entries)
 }
 
-/// Returns all file records for a given pull history entry.
+/// Returns all file records for a given pull history entry (with diff_content).
 pub fn get_pull_history_detail(
     conn: &Connection,
     pull_id: i64,
@@ -366,6 +392,89 @@ pub fn get_pull_history_detail(
         files.push(row.map_err(|e| crate::error::Error::DbError(e.to_string()))?);
     }
     Ok(files)
+}
+
+/// Returns file metadata only (no diff_content) for a pull history entry.
+/// Much lighter than `get_pull_history_detail` — safe to call for large pulls.
+pub fn get_pull_history_files_meta(
+    conn: &Connection,
+    pull_id: i64,
+) -> crate::error::Result<Vec<crate::models::pull_history::PullHistoryFileMeta>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, pull_id, file_path, change_type, additions, deletions
+             FROM pull_history_files WHERE pull_id = ?1 ORDER BY file_path",
+        )
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![pull_id], |row| {
+            Ok(crate::models::pull_history::PullHistoryFileMeta {
+                id: row.get(0)?,
+                pull_id: row.get(1)?,
+                file_path: row.get(2)?,
+                change_type: row.get(3)?,
+                additions: row.get(4)?,
+                deletions: row.get(5)?,
+            })
+        })
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let mut files = Vec::new();
+    for row in rows {
+        files.push(row.map_err(|e| crate::error::Error::DbError(e.to_string()))?);
+    }
+    Ok(files)
+}
+
+/// Returns the diff_content for a single file by its ID.
+pub fn get_file_diff_content(
+    conn: &Connection,
+    file_id: i64,
+) -> crate::error::Result<String> {
+    conn.query_row(
+        "SELECT diff_content FROM pull_history_files WHERE id = ?1",
+        rusqlite::params![file_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))
+}
+
+/// Returns storage stats: total bytes and per-entry sizes sorted by size DESC.
+pub fn get_storage_stats(
+    conn: &Connection,
+) -> crate::error::Result<crate::models::pull_history::StorageStats> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT ph.id, ph.repo_name, ph.branch, ph.pulled_at, ph.files_changed_count,
+                    COALESCE(SUM(LENGTH(CAST(phf.diff_content AS BLOB))), 0) AS size_bytes
+             FROM pull_history ph
+             LEFT JOIN pull_history_files phf ON phf.pull_id = ph.id
+             GROUP BY ph.id
+             ORDER BY size_bytes DESC",
+        )
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(crate::models::pull_history::PullEntrySize {
+                id: row.get(0)?,
+                repo_name: row.get(1)?,
+                branch: row.get(2)?,
+                pulled_at: row.get(3)?,
+                files_changed_count: row.get(4)?,
+                size_bytes: row.get(5)?,
+            })
+        })
+        .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row.map_err(|e| crate::error::Error::DbError(e.to_string()))?);
+    }
+
+    let total_bytes = entries.iter().map(|e| e.size_bytes).sum();
+    Ok(crate::models::pull_history::StorageStats { total_bytes, entries })
 }
 
 /// Deletes a single pull history entry and cascades to its file records.
