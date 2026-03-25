@@ -6,6 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Card, CardContent } from "$lib/components/ui/card";
   import { notifyNewPull, type PullResult } from "$lib/stores/pullHistoryStore";
+  import RepoPullHistory from "$lib/components/pull-history/RepoPullHistory.svelte";
   import {
     activeTagFilters,
     allTags,
@@ -193,7 +194,7 @@
     raw: "",
   });
   let readmeLoading = $state(false);
-  let previewMode = $state<"markdown" | "unified">("markdown");
+  let previewMode = $state<"markdown" | "unified" | "history">("markdown");
   let previewRequestId = 0;
   let unlistenState: UnlistenFn;
   let unlistenStart: UnlistenFn;
@@ -2067,84 +2068,96 @@
       </Button>
     </div>
 
-    {#if readmeLoading}
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <!-- Tab bar — always visible -->
       <div
-        class="flex-1 flex flex-col items-center justify-center space-y-6 py-48"
-        in:fade={{ duration: 200 }}
+        class="px-6 py-4 flex items-center justify-between border-b border-slate-200/70 bg-white/[0.02]"
       >
-        <div class="relative w-16 h-16">
-          <RefreshCw
-            class="w-full h-full animate-spin text-primary opacity-20"
-          />
-          <div class="absolute inset-0 flex items-center justify-center">
-            <FileText class="w-6 h-6 text-primary" />
-          </div>
-        </div>
-        <p
-          class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse"
-        >
-          Decrypting Repository Core
-        </p>
-      </div>
-    {:else if readmeContent.html}
-      <div
-        class="flex-1 flex flex-col overflow-hidden"
-        in:fade={{ duration: 200, delay: 50 }}
-      >
-        <!-- Mode Selector -->
         <div
-          class="px-6 py-4 flex items-center justify-between border-b border-slate-200/70 bg-white/[0.02]"
+          class="flex items-center space-x-2 bg-white/80 p-1 rounded-xl border border-slate-200/80"
         >
-          <div
-            class="flex items-center space-x-2 bg-white/80 p-1 rounded-xl border border-slate-200/80"
+          <button
+            onclick={() => (previewMode = "markdown")}
+            class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode ===
+            'markdown'
+              ? 'bg-primary text-primary-foreground shadow-glow'
+              : 'text-muted-foreground hover:text-foreground'}"
           >
-            <button
-              onclick={() => (previewMode = "markdown")}
-              class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode ===
-              'markdown'
-                ? 'bg-primary text-primary-foreground shadow-glow'
-                : 'text-muted-foreground hover:text-foreground'}"
-            >
-              Markdown
-            </button>
-            <button
-              onclick={() => (previewMode = "unified")}
-              class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode ===
-              'unified'
-                ? 'bg-primary text-primary-foreground shadow-glow'
-                : 'text-muted-foreground hover:text-foreground'}"
-            >
-              Unified
-            </button>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <OpenInEditor
-              repoPath={selectedRepoForPreview.path}
-              variant="outline"
-              size="sm"
-              class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100"
-              externalEditors={installedEditors}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100"
-              onclick={() =>
-                selectedRepoForPreview &&
-                openFolder(selectedRepoForPreview.path)}
-            >
-              <FolderOpen class="w-3 h-3 mr-2 text-primary" />
-              Open Folder
-            </Button>
-          </div>
+            Markdown
+          </button>
+          <button
+            onclick={() => (previewMode = "unified")}
+            class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode ===
+            'unified'
+              ? 'bg-primary text-primary-foreground shadow-glow'
+              : 'text-muted-foreground hover:text-foreground'}"
+          >
+            Unified
+          </button>
+          <button
+            onclick={() => (previewMode = "history")}
+            class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all {previewMode ===
+            'history'
+              ? 'bg-primary text-primary-foreground shadow-glow'
+              : 'text-muted-foreground hover:text-foreground'}"
+          >
+            History
+          </button>
         </div>
 
+        <div class="flex items-center gap-2">
+          <OpenInEditor
+            repoPath={selectedRepoForPreview.path}
+            variant="outline"
+            size="sm"
+            class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100"
+            externalEditors={installedEditors}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8 rounded-lg border-slate-200/80 text-[10px] font-bold uppercase tracking-widest bg-white/80 hover:bg-slate-100"
+            onclick={() =>
+              selectedRepoForPreview &&
+              openFolder(selectedRepoForPreview.path)}
+          >
+            <FolderOpen class="w-3 h-3 mr-2 text-primary" />
+            Open Folder
+          </Button>
+        </div>
+      </div>
+
+      <!-- Tab content -->
+      {#if previewMode === "history"}
+        <div class="flex-1 overflow-y-auto p-4 no-scrollbar">
+          <RepoPullHistory repoPath={selectedRepoForPreview.path} />
+        </div>
+      {:else if readmeLoading}
+        <div
+          class="flex-1 flex flex-col items-center justify-center space-y-6 py-48"
+          in:fade={{ duration: 200 }}
+        >
+          <div class="relative w-16 h-16">
+            <RefreshCw
+              class="w-full h-full animate-spin text-primary opacity-20"
+            />
+            <div class="absolute inset-0 flex items-center justify-center">
+              <FileText class="w-6 h-6 text-primary" />
+            </div>
+          </div>
+          <p
+            class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse"
+          >
+            Decrypting Repository Core
+          </p>
+        </div>
+      {:else if readmeContent.html}
         <div
           class="flex-1 overflow-y-auto p-12 prose prose-lg prose-neutral max-w-none no-scrollbar
           prose-a:text-primary prose-a:no-underline hover:prose-a:underline
           prose-blockquote:border-l-primary prose-blockquote:bg-primary/5 prose-blockquote:rounded-r-2xl prose-blockquote:py-2
           prose-img:rounded-3xl prose-img:border prose-img:border-slate-200/80 prose-img:shadow-2xl"
+          in:fade={{ duration: 200, delay: 50 }}
         >
           {#if previewMode === "markdown"}
             <div
@@ -2346,25 +2359,25 @@
             </div>
           {/if}
         </div>
-      </div>
-    {:else}
-      <div
-        class="flex-1 flex flex-col items-center justify-center space-y-6 py-48"
-        in:fade={{ duration: 200 }}
-      >
-        <div class="relative w-16 h-16">
-          <FileText class="w-full h-full text-primary opacity-20" />
-          <div class="absolute inset-0 flex items-center justify-center">
-            <RefreshCw class="w-6 h-6 text-primary animate-spin" />
-          </div>
-        </div>
-        <p
-          class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse"
+      {:else}
+        <div
+          class="flex-1 flex flex-col items-center justify-center space-y-6 py-48"
+          in:fade={{ duration: 200 }}
         >
-          No README Found
-        </p>
-      </div>
-    {/if}
+          <div class="relative w-16 h-16">
+            <FileText class="w-full h-full text-primary opacity-20" />
+            <div class="absolute inset-0 flex items-center justify-center">
+              <RefreshCw class="w-6 h-6 text-primary animate-spin" />
+            </div>
+          </div>
+          <p
+            class="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground animate-pulse"
+          >
+            No README Found
+          </p>
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
 

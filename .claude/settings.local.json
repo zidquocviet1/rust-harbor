@@ -15,7 +15,23 @@
       "Bash(npx svelte-check:*)",
       "Bash(cargo clean:*)",
       "Bash(python3:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(git rm:*)",
+      "Bash(find:*)",
+      "Bash(openspec new:*)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "Bash(npm run:*)",
+      "Bash(node -e \"const pkg = require\\(''./node_modules/svelte/package.json''\\); console.log\\(pkg.version\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Bash(node:*)",
+      "WebFetch(domain:shadcn-svelte.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.shadcn-svelte.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(grep -r RangeCalendar node_modules/bits-ui/dist --include=*.d.ts -l)",
+      "Bash(xargs -I {} basename {})"
     ]
   }
 }
