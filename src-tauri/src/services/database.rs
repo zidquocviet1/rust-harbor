@@ -99,6 +99,10 @@ pub fn init_database(app_handle: &tauri::AppHandle) -> crate::error::Result<DbPo
     let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_before_author TEXT", []);
     let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_after_message TEXT", []);
     let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN commit_after_author TEXT", []);
+    // Migration: add ai_summary column for cached AI-generated summaries
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN ai_summary TEXT", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN ai_provider TEXT", []);
+    let _ = conn.execute("ALTER TABLE pull_history ADD COLUMN ai_model TEXT", []);
 
     // Create pull_history_files table — per-file diff records for each pull event
     conn.execute(
@@ -319,12 +323,12 @@ pub fn get_pull_history(
 ) -> crate::error::Result<Vec<crate::models::pull_history::PullHistoryEntry>> {
     let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match repo_path {
         Some(path) => (
-            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author
+            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author, ai_summary, ai_provider, ai_model
              FROM pull_history WHERE repo_path = ?1 ORDER BY pulled_at DESC".to_string(),
             vec![Box::new(path.to_string())],
         ),
         None => (
-            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author
+            "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author, ai_summary, ai_provider, ai_model
              FROM pull_history ORDER BY pulled_at DESC".to_string(),
             vec![],
         ),
@@ -350,6 +354,9 @@ pub fn get_pull_history(
                 commit_before_author: row.get(11)?,
                 commit_after_message: row.get(12)?,
                 commit_after_author: row.get(13)?,
+                ai_summary: row.get(14)?,
+                ai_provider: row.get(15)?,
+                ai_model: row.get(16)?,
             })
         })
         .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
@@ -506,6 +513,26 @@ pub fn clear_pull_history(conn: &Connection) -> crate::error::Result<()> {
 pub fn get_pull_history_count(conn: &Connection) -> crate::error::Result<i64> {
     conn.query_row("SELECT COUNT(*) FROM pull_history", [], |r| r.get(0))
         .map_err(|e| crate::error::Error::DbError(e.to_string()))
+}
+
+/// Returns the cached AI summary for a pull record, or None if not yet generated.
+pub fn get_pull_summary(conn: &Connection, pull_id: i64) -> crate::error::Result<Option<String>> {
+    conn.query_row(
+        "SELECT ai_summary FROM pull_history WHERE id = ?1",
+        rusqlite::params![pull_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))
+}
+
+/// Persists an AI-generated summary for a pull record.
+pub fn save_pull_summary(conn: &Connection, pull_id: i64, summary: &str, provider: &str, model: &str) -> crate::error::Result<()> {
+    conn.execute(
+        "UPDATE pull_history SET ai_summary = ?1, ai_provider = ?2, ai_model = ?3 WHERE id = ?4",
+        rusqlite::params![summary, provider, model, pull_id],
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))?;
+    Ok(())
 }
 
 #[cfg(test)]

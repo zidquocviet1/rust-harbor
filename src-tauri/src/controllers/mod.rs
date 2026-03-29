@@ -3,3 +3,4 @@ pub mod repo;
 pub mod settings;
 pub mod tags;
 pub mod pull_history;
+pub mod ai_summary;

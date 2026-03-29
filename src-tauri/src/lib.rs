@@ -4,7 +4,7 @@ pub mod config;
 pub mod controllers;
 pub mod services;
 
-use crate::controllers::{repo, settings, tags, pull_history};
+use crate::controllers::{repo, settings, tags, pull_history, ai_summary};
 use crate::services::watcher::RepoWatcher;
 use crate::services::database;
 use std::sync::{Arc, Mutex};
@@ -126,6 +126,9 @@ pub fn run() {
             pull_history::clear_all_pull_history,
             pull_history::pull_history_count,
             pull_history::get_pull_history_storage_stats,
+            ai_summary::get_ai_config,
+            ai_summary::save_ai_config_cmd,
+            ai_summary::generate_pull_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

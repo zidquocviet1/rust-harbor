@@ -56,6 +56,12 @@ pub struct PullHistoryEntry {
     pub commit_after_message: Option<String>,
     /// Author name of the after-commit.
     pub commit_after_author: Option<String>,
+    /// Cached AI-generated summary of the changes in this pull, or None if not yet generated.
+    pub ai_summary: Option<String>,
+    /// Provider used when the AI summary was generated (e.g. "claude", "openai").
+    pub ai_provider: Option<String>,
+    /// Model used when the AI summary was generated (e.g. "claude-sonnet-4-6").
+    pub ai_model: Option<String>,
 }
 
 /// Full detail for a pull history entry — entry + all file records.
