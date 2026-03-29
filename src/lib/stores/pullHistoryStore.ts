@@ -28,6 +28,9 @@ export interface PullHistoryEntry {
   commit_before_author: string | null;
   commit_after_message: string | null;
   commit_after_author: string | null;
+  ai_summary: string | null;
+  ai_provider: string | null;
+  ai_model: string | null;
 }
 
 export interface PullHistoryDetail {
@@ -35,10 +38,26 @@ export interface PullHistoryDetail {
   files: PullHistoryFile[];
 }
 
+export interface AiConfigPublic {
+  provider: string;
+  model: string;
+  ollama_base_url: string | null;
+  has_api_key: boolean;
+  auth_method: string;
+}
+
 export interface PullResult {
   output: string;
   history_id: number | null;
 }
+
+export const PROVIDER_MODELS: Record<string, string[]> = {
+  claude: ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"],
+  openai: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
+  gemini: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+  grok: ["grok-3", "grok-3-mini", "grok-2-1212"],
+  ollama: ["llama3.2", "mistral", "qwen2.5-coder"],
+};
 
 // ── Core Stores ───────────────────────────────────────────────────────────────
 
@@ -216,4 +235,22 @@ export function notifyNewPull(historyId: number | null) {
 /** Call when navigating to /pull-history to reset the badge. */
 export function resetUnreadCount() {
   unreadCount.set(0);
+}
+
+// ── AI Summary ────────────────────────────────────────────────────────────────
+
+export async function fetchAiConfig(): Promise<AiConfigPublic> {
+  return invoke<AiConfigPublic>("get_ai_config");
+}
+
+export async function generatePullSummary(
+  pullId: number,
+  forceRegenerate = false,
+  selectedModel?: string,
+): Promise<string> {
+  return invoke<string>("generate_pull_summary", {
+    pullId,
+    forceRegenerate,
+    selectedModel: selectedModel ?? null,
+  });
 }

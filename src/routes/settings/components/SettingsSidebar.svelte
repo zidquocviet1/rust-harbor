@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
-  import { Binary, Database, Shield, Zap } from "lucide-svelte";
+  import { Binary, Bot, Database, Shield, Zap } from "lucide-svelte";
 
   interface Props {
-    activeTab: "general" | "performance" | "security" | "git";
-    onTabChange: (tab: "general" | "performance" | "security" | "git") => void;
+    activeTab: "general" | "performance" | "security" | "git" | "ai";
+    onTabChange: (
+      tab: "general" | "performance" | "security" | "git" | "ai",
+    ) => void;
   }
 
   let { activeTab, onTabChange }: Props = $props();
@@ -14,6 +16,7 @@
     { id: "performance", label: "Performance", icon: Zap },
     { id: "security", label: "Security", icon: Shield },
     { id: "git", label: "Git Binary", icon: Binary },
+    { id: "ai", label: "AI Settings", icon: Bot },
   ] as const;
 </script>
 

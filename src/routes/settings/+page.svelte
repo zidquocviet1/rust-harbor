@@ -1,11 +1,12 @@
 <script lang="ts">
+  import AiSettings from "./components/AiSettings.svelte";
   import GeneralSettings from "./components/GeneralSettings.svelte";
   import GitSettings from "./components/GitSettings.svelte";
   import PerformanceSettings from "./components/PerformanceSettings.svelte";
   import SecuritySettings from "./components/SecuritySettings.svelte";
   import SettingsSidebar from "./components/SettingsSidebar.svelte";
 
-  let activeTab = $state<"general" | "performance" | "security" | "git">(
+  let activeTab = $state<"general" | "performance" | "security" | "git" | "ai">(
     "general",
   );
 </script>
@@ -43,6 +44,10 @@
       {:else if activeTab === "security"}
         <div class="animate-in fade-in slide-in-from-right-4 duration-500">
           <SecuritySettings />
+        </div>
+      {:else if activeTab === "ai"}
+        <div class="animate-in fade-in slide-in-from-right-4 duration-500">
+          <AiSettings />
         </div>
       {/if}
     </div>

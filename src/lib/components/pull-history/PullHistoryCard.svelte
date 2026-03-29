@@ -13,6 +13,7 @@
     Trash2,
   } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import AiSummaryPanel from "./AiSummaryPanel.svelte";
   import CommitInfo from "./CommitInfo.svelte";
   import FileList from "./FileList.svelte";
 
@@ -32,6 +33,7 @@
   let loadingDetail = $state(false);
   let showDeleteConfirm = $state(false);
   let deleting = $state(false);
+  let highlightFileId = $state<number | null>(null);
 
   async function toggleExpand() {
     if (selectMode) {
@@ -256,13 +258,31 @@
     >
       <CommitInfo {entry} />
 
+      <!-- AI Summary Panel — shown immediately with cached summary if available -->
+      <AiSummaryPanel
+        pullId={entry.id}
+        initialSummary={entry.ai_summary || null}
+        initialProvider={entry.ai_provider || null}
+        initialModel={entry.ai_model || null}
+        files={detail?.files ?? []}
+        onFileClick={(id) => {
+          highlightFileId = id;
+          setTimeout(() => (highlightFileId = null), 50);
+        }}
+      />
+
       {#if loadingDetail}
         <div class="flex items-center gap-2 text-[13px] text-muted-foreground">
           <Loader2 size={14} class="animate-spin" />
           Loading changes…
         </div>
       {:else if detail && detail.files.length > 0}
-        <FileList files={detail.files} {totalAdditions} {totalDeletions} />
+        <FileList
+          files={detail.files}
+          {totalAdditions}
+          {totalDeletions}
+          {highlightFileId}
+        />
       {:else if detail}
         <p class="text-[13px] text-muted-foreground">
           No file changes recorded for this pull.
