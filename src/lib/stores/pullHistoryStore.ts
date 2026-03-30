@@ -243,14 +243,31 @@ export async function fetchAiConfig(): Promise<AiConfigPublic> {
   return invoke<AiConfigPublic>("get_ai_config");
 }
 
+export interface AiConfigsPublic {
+  active_provider: string;
+  providers: Record<string, {
+    model: string;
+    api_key: string | null;
+    has_api_key: boolean;
+    ollama_base_url: string | null;
+    auth_method: string;
+  }>;
+}
+
+export async function fetchAiConfigs(): Promise<AiConfigsPublic> {
+  return invoke<AiConfigsPublic>("get_ai_configs");
+}
+
 export async function generatePullSummary(
   pullId: number,
   forceRegenerate = false,
   selectedModel?: string,
+  selectedProvider?: string,
 ): Promise<string> {
   return invoke<string>("generate_pull_summary", {
     pullId,
     forceRegenerate,
     selectedModel: selectedModel ?? null,
+    selectedProvider: selectedProvider ?? null,
   });
 }

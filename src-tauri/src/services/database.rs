@@ -368,6 +368,40 @@ pub fn get_pull_history(
     Ok(entries)
 }
 
+/// Returns a single pull history entry by its ID.
+pub fn get_pull_history_entry(
+    conn: &Connection,
+    pull_id: i64,
+) -> crate::error::Result<crate::models::pull_history::PullHistoryEntry> {
+    conn.query_row(
+        "SELECT id, repo_path, repo_name, branch, pulled_at, commit_before, commit_after, files_changed_count, commit_before_date, commit_after_date, commit_before_message, commit_before_author, commit_after_message, commit_after_author, ai_summary, ai_provider, ai_model
+         FROM pull_history WHERE id = ?1",
+        rusqlite::params![pull_id],
+        |row| {
+            Ok(crate::models::pull_history::PullHistoryEntry {
+                id: row.get(0)?,
+                repo_path: row.get(1)?,
+                repo_name: row.get(2)?,
+                branch: row.get(3)?,
+                pulled_at: row.get(4)?,
+                commit_before: row.get(5)?,
+                commit_after: row.get(6)?,
+                files_changed_count: row.get(7)?,
+                commit_before_date: row.get(8)?,
+                commit_after_date: row.get(9)?,
+                commit_before_message: row.get(10)?,
+                commit_before_author: row.get(11)?,
+                commit_after_message: row.get(12)?,
+                commit_after_author: row.get(13)?,
+                ai_summary: row.get(14)?,
+                ai_provider: row.get(15)?,
+                ai_model: row.get(16)?,
+            })
+        },
+    )
+    .map_err(|e| crate::error::Error::DbError(e.to_string()))
+}
+
 /// Returns all file records for a given pull history entry (with diff_content).
 pub fn get_pull_history_detail(
     conn: &Connection,

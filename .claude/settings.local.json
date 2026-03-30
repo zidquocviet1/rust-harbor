@@ -31,7 +31,8 @@
       "WebFetch(domain:www.shadcn-svelte.com)",
       "WebFetch(domain:api.github.com)",
       "Bash(grep -r RangeCalendar node_modules/bits-ui/dist --include=*.d.ts -l)",
-      "Bash(xargs -I {} basename {})"
+      "Bash(xargs -I {} basename {})",
+      "Bash(cargo test:*)"
     ]
   }
 }
