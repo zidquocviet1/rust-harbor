@@ -1,10 +1,11 @@
 <script lang="ts">
+  import ProviderIcon from "$lib/components/icons/ProviderIcon.svelte";
   import {
     type AiConfigPublic,
     type PullHistoryFile,
     fetchAiConfig,
+    fetchAiConfigs,
     generatePullSummary,
-    PROVIDER_MODELS,
   } from "$lib/stores/pullHistoryStore";
   import {
     Bot,
@@ -15,15 +16,15 @@
     Sparkles,
   } from "lucide-svelte";
   import { onMount } from "svelte";
+  import type { ModelItem } from "./ModelSelectDropdown.svelte";
+  import ModelSelectDropdown from "./ModelSelectDropdown.svelte";
 
   interface Props {
     pullId: number;
     initialSummary?: string | null;
     initialProvider?: string | null;
     initialModel?: string | null;
-    /** Changed files for this pull — used to inject clickable file links into the summary. */
     files?: PullHistoryFile[];
-    /** Called when the user clicks a file link in the summary. */
     onFileClick?: (fileId: number) => void;
   }
 
@@ -41,10 +42,24 @@
   let loading = $state(false);
   let error = $state<string | null>(null);
   let aiConfig = $state<AiConfigPublic | null>(null);
+  /** Model snapshot saved with this pull entry. */
   let usedModel = $state<string | null>(null);
-  let selectedModel = $state<string>("");
+  let usedProvider = $state<string | null>(null);
+  /** All configured provider+model combos available for (re)generation. */
+  let regenItems = $state<ModelItem[]>([]);
+  /** Currently selected provider for regeneration. */
+  let regenProvider = $state<string>("");
+  /** Currently selected model for regeneration. */
+  let regenModel = $state<string>("");
 
-  // Simple markdown → HTML renderer for the subset we care about.
+  const PROVIDER_LABELS: Record<string, string> = {
+    claude: "Claude",
+    openai: "OpenAI",
+    gemini: "Gemini",
+    grok: "Grok",
+    ollama: "Ollama",
+  };
+
   function renderMarkdown(text: string): string {
     return text
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -66,46 +81,33 @@
       .replace(/\n/g, "<br>");
   }
 
-  /**
-   * Inject clickable file-link buttons for every file path (or basename) mentioned
-   * in the summary text. Uses a placeholder strategy so markdown rendering doesn't
-   * interfere with injected HTML.
-   */
   function injectFileLinks(
     text: string,
     changedFiles: PullHistoryFile[],
   ): string {
     if (!changedFiles.length) return renderMarkdown(text);
 
-    // Build a map: searchTerm → { id, displayName }
-    // Prefer full path match; also register basename if unique.
     const links = new Map<string, { id: number; display: string }>();
-    const basenames = new Map<string, number>(); // basename → count across files
+    const basenames = new Map<string, number>();
 
     for (const f of changedFiles) {
       const base = f.file_path.split("/").at(-1) ?? f.file_path;
       basenames.set(base, (basenames.get(base) ?? 0) + 1);
     }
-
     for (const f of changedFiles) {
-      // Always register the full path
       links.set(f.file_path, {
         id: f.id,
         display: f.file_path.split("/").at(-1) ?? f.file_path,
       });
-      // Register basename only if it's unique among changed files
       const base = f.file_path.split("/").at(-1) ?? f.file_path;
       if (base !== f.file_path && basenames.get(base) === 1) {
         links.set(base, { id: f.id, display: base });
       }
     }
 
-    // Sort by length descending so longer paths are replaced before their substrings
     const sorted = [...links.entries()].sort(
       (a, b) => b[0].length - a[0].length,
     );
-
-    // Replace with placeholders first, then run markdown, then swap in HTML
     const PLACEHOLDER_PREFIX = "\x00FILE\x00";
     const placeholderMap = new Map<string, { id: number; display: string }>();
 
@@ -117,10 +119,8 @@
       processed = processed.replace(new RegExp(escaped, "g"), placeholder);
     }
 
-    // Apply markdown to the placeholder-substituted text
     let html = renderMarkdown(processed);
 
-    // Replace each placeholder with a styled, clickable button
     for (const [placeholder, { id, display }] of placeholderMap) {
       const escapedPh = placeholder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       html = html.replace(
@@ -141,7 +141,6 @@
     return html;
   }
 
-  // Derived rendered HTML — updates reactively when summary or files change.
   const renderedHtml = $derived(
     summary !== null ? injectFileLinks(summary, files) : "",
   );
@@ -160,18 +159,29 @@
       (aiConfig.has_api_key || aiConfig.provider === "ollama"),
   );
 
-  const availableModels = $derived(
-    aiConfig
-      ? (PROVIDER_MODELS[aiConfig.provider] ??
-          (aiConfig.model ? [aiConfig.model] : []))
-      : [],
-  );
+  const activeProvider = $derived(aiConfig?.provider ?? "");
+  const configuredModel = $derived(aiConfig?.model ?? "");
 
   async function loadConfig() {
     try {
+      // Load active provider config (for the initial generate state)
       aiConfig = await fetchAiConfig();
-      if (!selectedModel && aiConfig.model) {
-        selectedModel = aiConfig.model;
+
+      // Load ALL configured providers to build the regen items list
+      const all = await fetchAiConfigs();
+      const items: ModelItem[] = [];
+      for (const [provId, pc] of Object.entries(all.providers)) {
+        if (pc.model) {
+          items.push({ provider: provId, model: pc.model });
+        }
+      }
+      regenItems = items;
+
+      // Default regen selection to the active provider
+      if (!regenProvider && all.active_provider) {
+        regenProvider = all.active_provider;
+        const activePc = all.providers[all.active_provider];
+        regenModel = activePc?.model ?? "";
       }
     } catch {
       aiConfig = {
@@ -184,20 +194,26 @@
     }
   }
 
-  async function generate(forceRegenerate = false) {
+  async function generate(
+    forceRegenerate = false,
+    provider?: string,
+    model?: string,
+  ) {
     loading = true;
     error = null;
     summary = null;
 
+    const useProvider = provider ?? activeProvider;
+    const useModel = model ?? configuredModel;
     let nextSummary: string | null = null;
     let nextError: string | null = null;
-    const modelUsed = selectedModel || aiConfig?.model || null;
 
     try {
       const result = await generatePullSummary(
         pullId,
         forceRegenerate,
-        selectedModel || undefined,
+        useModel || undefined,
+        useProvider || undefined,
       );
       nextSummary = result ?? null;
     } catch (e: any) {
@@ -205,16 +221,19 @@
       nextError = msg || "Failed to generate summary. Please try again.";
     }
 
-    // Apply all state updates in one synchronous block so Svelte batches them.
     summary = nextSummary;
     error = nextError;
-    if (nextSummary !== null) usedModel = modelUsed;
+    if (nextSummary !== null) {
+      usedModel = useModel || null;
+      usedProvider = useProvider || null;
+    }
     loading = false;
   }
 
   onMount(() => {
     summary = initialSummary || null;
     usedModel = initialModel || null;
+    usedProvider = initialProvider || null;
     loadConfig();
   });
 </script>
@@ -222,17 +241,16 @@
 <div class="bg-white/80 rounded-2xl border border-slate-200/70 overflow-hidden">
   <!-- Header -->
   <div
-    class="px-4 py-2.5 flex items-center justify-between {!collapsed
+    class="px-4 py-2.5 flex items-center gap-2 {!collapsed
       ? 'border-b border-slate-100'
       : ''}"
   >
     {#if summary !== null && !loading}
-      <!-- Clickable label toggles collapse -->
       <button
         type="button"
         onclick={() => (collapsed = !collapsed)}
         class="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest
-               text-muted-foreground hover:text-foreground transition-colors"
+               text-muted-foreground hover:text-foreground transition-colors shrink-0"
       >
         <Bot size={12} strokeWidth={2.5} />
         AI Summary
@@ -243,33 +261,31 @@
           style="transform: {collapsed ? 'rotate(-90deg)' : 'rotate(0deg)'};"
         />
       </button>
+
+      <!-- Regenerate controls: model picker across all configured providers + button -->
       <div class="flex items-center gap-2 ml-auto shrink-0">
-        {#if usedModel}
-          <span
-            class="text-[10px] text-muted-foreground/50 font-mono truncate max-w-[110px]"
-            title={usedModel}
-          >
-            {usedModel}
-          </span>
-          <span class="w-px h-3 bg-border shrink-0"></span>
-        {/if}
-        {#if availableModels.length > 0}
-          <select
-            bind:value={selectedModel}
-            class="text-[11px] font-mono bg-muted/50 border border-border rounded-lg px-1.5 py-0.5 text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 max-w-[130px]"
-          >
-            {#each availableModels as m}
-              <option value={m}>{m}</option>
-            {/each}
-            {#if selectedModel && !availableModels.includes(selectedModel)}
-              <option value={selectedModel}>{selectedModel}</option>
-            {/if}
-          </select>
+        {#if regenItems.length > 0}
+          <div class="w-[200px]">
+            <ModelSelectDropdown
+              items={regenItems}
+              value={regenModel || configuredModel}
+              valueProvider={regenProvider || activeProvider}
+              onchange={(p, m) => {
+                regenProvider = p;
+                regenModel = m;
+              }}
+            />
+          </div>
         {/if}
         <button
           type="button"
-          onclick={() => generate(true)}
-          class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors"
+          onclick={() =>
+            generate(
+              true,
+              regenProvider || activeProvider,
+              regenModel || configuredModel,
+            )}
+          class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors shrink-0"
         >
           <RefreshCw size={11} strokeWidth={2.5} />
           Regenerate
@@ -289,43 +305,37 @@
   {#if !collapsed}
     <div class="p-4">
       {#if loading}
-        <!-- Generating state -->
         <div class="flex items-center gap-2 text-[13px] text-muted-foreground">
           <Loader2 size={14} class="animate-spin" />
           Generating summary…
         </div>
       {:else if error}
-        <!-- Error state -->
         <div class="space-y-3">
           <p class="text-[12px] text-destructive">{error}</p>
           {#if isAiReady}
             <div class="flex flex-col gap-2">
-              {#if availableModels.length > 0}
-                <div class="flex items-center gap-2">
-                  <label
-                    class="text-[11px] font-semibold text-muted-foreground shrink-0"
-                    >Model</label
+              {#if activeProvider}
+                <div
+                  class="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 w-fit"
+                >
+                  <ProviderIcon provider={activeProvider} />
+                  <span class="text-[12px] font-semibold text-foreground"
+                    >{PROVIDER_LABELS[activeProvider] ?? activeProvider}</span
                   >
-                  <select
-                    bind:value={selectedModel}
-                    class="flex-1 text-[12px] font-mono bg-muted/50 border border-border rounded-lg px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  >
-                    {#each availableModels as m}
-                      <option value={m}>{m}</option>
-                    {/each}
-                    {#if selectedModel && !availableModels.includes(selectedModel)}
-                      <option value={selectedModel}
-                        >{selectedModel} (custom)</option
-                      >
-                    {/if}
-                  </select>
+                  {#if configuredModel}
+                    <span class="w-1 h-1 rounded-full bg-border shrink-0"
+                    ></span>
+                    <span class="text-[11px] text-muted-foreground font-mono"
+                      >{configuredModel}</span
+                    >
+                  {/if}
                 </div>
               {/if}
               <button
                 type="button"
                 onclick={() => generate(false)}
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold
-                     bg-primary/10 text-primary hover:bg-primary/15 transition-colors border border-primary/20"
+                     bg-primary/10 text-primary hover:bg-primary/15 transition-colors border border-primary/20 w-fit"
               >
                 <Sparkles size={12} strokeWidth={2.5} />
                 Try again
@@ -334,7 +344,6 @@
           {/if}
         </div>
       {:else if summary !== null}
-        <!-- Summary result — onclick is event delegation for injected file-link buttons -->
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -344,8 +353,28 @@
           <!-- eslint-disable-next-line svelte/no-at-html-tags -->
           {@html renderedHtml}
         </div>
+
+        <!-- Model attribution hint -->
+        {#if usedProvider || usedModel}
+          <div
+            class="flex items-center gap-1.5 mt-3 pt-3 border-t border-slate-100"
+          >
+            <span
+              class="text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold"
+              >Generated with</span
+            >
+            {#if usedProvider}
+              <ProviderIcon provider={usedProvider} />
+            {/if}
+            {#if usedModel}
+              <span
+                class="text-[11px] text-muted-foreground/70 font-mono"
+                title={usedModel}>{usedModel}</span
+              >
+            {/if}
+          </div>
+        {/if}
       {:else if !isAiReady}
-        <!-- Not configured -->
         <div class="flex items-center gap-3 py-1">
           <div class="p-2 rounded-xl bg-muted text-muted-foreground shrink-0">
             <Settings size={14} strokeWidth={2} />
@@ -367,26 +396,22 @@
           </div>
         </div>
       {:else}
-        <!-- Model selector + generate button -->
+        <!-- Active provider info chip + generate button -->
         <div class="flex flex-col gap-3">
-          {#if availableModels.length > 0 && isAiReady}
-            <div class="flex items-center gap-2">
-              <label
-                class="text-[11px] font-semibold text-muted-foreground shrink-0"
-                >Model</label
+          {#if activeProvider}
+            <div
+              class="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 w-fit"
+            >
+              <ProviderIcon provider={activeProvider} />
+              <span class="text-[12px] font-semibold text-foreground"
+                >{PROVIDER_LABELS[activeProvider] ?? activeProvider}</span
               >
-              <select
-                bind:value={selectedModel}
-                class="flex-1 text-[12px] font-mono bg-muted/50 border border-border rounded-lg px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-              >
-                {#each availableModels as m}
-                  <option value={m}>{m}</option>
-                {/each}
-                {#if selectedModel && !availableModels.includes(selectedModel)}
-                  <option value={selectedModel}>{selectedModel} (custom)</option
-                  >
-                {/if}
-              </select>
+              {#if configuredModel}
+                <span class="w-1 h-1 rounded-full bg-border shrink-0"></span>
+                <span class="text-[11px] text-muted-foreground font-mono"
+                  >{configuredModel}</span
+                >
+              {/if}
             </div>
           {/if}
           <button
@@ -394,7 +419,7 @@
             onclick={() => generate(false)}
             class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-semibold
                  bg-primary/10 text-primary hover:bg-primary/15 transition-all duration-140
-                 border border-primary/20 hover:border-primary/30 hover:shadow-sm"
+                 border border-primary/20 hover:border-primary/30 hover:shadow-sm w-fit"
           >
             <Sparkles size={14} strokeWidth={2} />
             Summarize with AI
