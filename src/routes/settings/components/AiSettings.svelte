@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
+  import ProviderIcon from "$lib/components/icons/ProviderIcon.svelte";
   import {
     Card,
     CardContent,
@@ -19,32 +20,29 @@
     Loader2,
     Lock,
     Server,
-    ShieldCheck,
     Trash2,
-    XCircle,
   } from "lucide-svelte";
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
 
-  interface AiConfigPublic {
-    provider: string;
-    model: string;
-    ollama_base_url: string | null;
-    has_api_key: boolean;
-    auth_method: string;
-  }
-
   type Provider = "claude" | "openai" | "gemini" | "grok" | "ollama";
-  type AuthMethod = "api_key" | "oauth_token";
 
   interface ProviderDef {
     id: Provider;
     label: string;
     models: string[];
-    /** Authentication methods this provider supports. */
-    authMethods: AuthMethod[];
-    /** Human-readable note shown when OAuth is not supported. */
-    noOauthNote?: string;
+    requiresKey: boolean;
+  }
+
+  interface ProviderState {
+    model: string;
+    apiKey: string;
+    ollamaBaseUrl: string;
+    hasApiKey: boolean;
+    apiKeyEditing: boolean;
+    showApiKey: boolean;
+    saving: boolean;
+    clearing: boolean;
   }
 
   const PROVIDERS: ProviderDef[] = [
@@ -56,125 +54,139 @@
         "claude-sonnet-4-6",
         "claude-opus-4-6",
       ],
-      authMethods: ["api_key"],
-      noOauthNote: "Anthropic's API uses API keys only.",
+      requiresKey: true,
     },
     {
       id: "openai",
       label: "OpenAI",
       models: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"],
-      authMethods: ["api_key"],
-      noOauthNote: "OpenAI's direct API uses API keys only.",
+      requiresKey: true,
     },
     {
       id: "gemini",
       label: "Gemini (Google)",
       models: ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-      authMethods: ["api_key", "oauth_token"],
+      requiresKey: true,
     },
     {
       id: "grok",
       label: "Grok (xAI)",
       models: ["grok-3", "grok-3-mini", "grok-2-1212"],
-      authMethods: ["api_key"],
-      noOauthNote: "xAI's API uses API keys only.",
+      requiresKey: true,
     },
     {
       id: "ollama",
       label: "Ollama (local)",
       models: ["llama3.2", "mistral", "qwen2.5-coder"],
-      authMethods: [],
+      requiresKey: false,
     },
   ];
 
-  let provider = $state<Provider>("claude");
-  let model = $state("");
-  let apiKey = $state("");
-  let authMethod = $state<AuthMethod>("api_key");
-  let ollamaBaseUrl = $state("http://localhost:11434");
-  let hasApiKey = $state(false);
-  let showApiKey = $state(false);
-  let apiKeyEditing = $state(false);
-  let saving = $state(false);
-  let clearing = $state(false);
-
-  const selectedProvider = $derived(PROVIDERS.find((p) => p.id === provider)!);
-  const supportsOAuth = $derived(
-    selectedProvider.authMethods.includes("oauth_token"),
-  );
-  const needsCredential = $derived(provider !== "ollama");
-  const isOllamaProvider = $derived(provider === "ollama");
-
-  // When switching provider, reset auth method to first supported
-  function selectProvider(id: Provider) {
-    provider = id;
-    model = "";
-    apiKeyEditing = false;
-    const def = PROVIDERS.find((p) => p.id === id)!;
-    authMethod = def.authMethods[0] ?? "api_key";
+  function defaultState(): ProviderState {
+    return {
+      model: "",
+      apiKey: "",
+      ollamaBaseUrl: "http://localhost:11434",
+      hasApiKey: false,
+      apiKeyEditing: false,
+      showApiKey: false,
+      saving: false,
+      clearing: false,
+    };
   }
 
-  async function loadConfig() {
+  let activeProvider = $state<Provider>("claude");
+  let selectedTab = $state<Provider>("claude");
+
+  let states = $state<Record<Provider, ProviderState>>({
+    claude: defaultState(),
+    openai: defaultState(),
+    gemini: defaultState(),
+    grok: defaultState(),
+    ollama: defaultState(),
+  });
+
+  const tab = $derived(states[selectedTab]);
+  const tabDef = $derived(PROVIDERS.find((p) => p.id === selectedTab)!);
+  const isOllama = $derived(selectedTab === "ollama");
+
+  const isConfigured = (id: Provider) =>
+    states[id].model.length > 0 && (states[id].hasApiKey || id === "ollama");
+
+  async function loadConfigs() {
     try {
-      const cfg = await invoke<AiConfigPublic>("get_ai_config");
-      if (cfg.provider) provider = cfg.provider as Provider;
-      if (cfg.model) model = cfg.model;
-      if (cfg.ollama_base_url) ollamaBaseUrl = cfg.ollama_base_url;
-      if (cfg.auth_method) authMethod = cfg.auth_method as AuthMethod;
-      hasApiKey = cfg.has_api_key;
+      const data = await invoke<{
+        active_provider: string;
+        providers: Record<
+          string,
+          {
+            model: string;
+            api_key: string | null;
+            has_api_key: boolean;
+            ollama_base_url: string | null;
+          }
+        >;
+      }>("get_ai_configs");
+
+      activeProvider = (data.active_provider as Provider) || "claude";
+      selectedTab = activeProvider;
+
+      for (const [id, pc] of Object.entries(data.providers)) {
+        const pid = id as Provider;
+        if (states[pid]) {
+          states[pid].model = pc.model;
+          states[pid].apiKey = pc.api_key ?? "";
+          states[pid].hasApiKey = pc.has_api_key;
+          states[pid].ollamaBaseUrl =
+            pc.ollama_base_url ?? "http://localhost:11434";
+        }
+      }
     } catch (e) {
-      console.error("[AiSettings] failed to load config:", e);
+      console.error("[AiSettings] failed to load configs:", e);
     }
   }
 
   async function save() {
-    saving = true;
+    states[selectedTab].saving = true;
     try {
-      await invoke("save_ai_config_cmd", {
-        provider,
-        model,
-        apiKey: apiKey || null,
-        ollamaBaseUrl: isOllamaProvider ? ollamaBaseUrl : null,
-        authMethod,
+      await invoke("save_provider_config", {
+        provider: selectedTab,
+        model: tab.model,
+        apiKey: tab.apiKey || null,
+        ollamaBaseUrl: isOllama ? tab.ollamaBaseUrl : null,
+        authMethod: "api_key",
       });
-      hasApiKey =
-        needsCredential && !isOllamaProvider ? apiKey.length > 0 : false;
-      apiKey = "";
-      apiKeyEditing = false;
+      activeProvider = selectedTab;
+      if (tabDef.requiresKey) {
+        states[selectedTab].hasApiKey = tab.hasApiKey || tab.apiKey.length > 0;
+      }
+      states[selectedTab].apiKey = "";
+      states[selectedTab].apiKeyEditing = false;
+      states[selectedTab].showApiKey = false;
       toast.success("AI settings saved");
     } catch (e: any) {
       toast.error(typeof e === "string" ? e : "Failed to save AI settings");
     } finally {
-      saving = false;
+      states[selectedTab].saving = false;
     }
   }
 
-  async function clear() {
-    clearing = true;
+  async function clearProvider() {
+    states[selectedTab].clearing = true;
     try {
-      await invoke("save_ai_config_cmd", {
-        provider: "",
-        model: "",
-        apiKey: null,
-        ollamaBaseUrl: null,
-        authMethod: "api_key",
-      });
-      provider = "claude";
-      model = "";
-      apiKey = "";
-      apiKeyEditing = false;
-      authMethod = "api_key";
-      ollamaBaseUrl = "http://localhost:11434";
-      hasApiKey = false;
-      toast.success("AI settings cleared");
-    } catch (e: any) {
-      toast.error("Failed to clear AI settings");
+      await invoke("clear_provider_config", { provider: selectedTab });
+      states[selectedTab] = defaultState();
+      const data = await invoke<{ active_provider: string }>("get_ai_configs");
+      activeProvider = (data.active_provider as Provider) || "claude";
+      toast.success("Provider config cleared");
+    } catch {
+      toast.error("Failed to clear provider config");
     } finally {
-      clearing = false;
+      states[selectedTab].clearing = false;
     }
   }
 
-  onMount(loadConfig);
+  onMount(loadConfigs);
 </script>
 
 <div class="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
@@ -187,44 +199,41 @@
         <div>
           <CardTitle class="text-lg">AI Provider</CardTitle>
           <CardDescription>
-            Configure the AI model used to generate pull change summaries.
+            Configure AI providers used to generate pull change summaries.
           </CardDescription>
         </div>
       </div>
     </CardHeader>
     <CardContent class="space-y-6">
-      <!-- Provider selector -->
+      <!-- Provider tab selector -->
       <div class="space-y-2">
         <Label class="text-sm font-semibold">Provider</Label>
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {#each PROVIDERS as p}
-            {@const oauthSupported = p.authMethods.includes("oauth_token")}
-            {@const noAuth = p.authMethods.length === 0}
+            {@const configured = isConfigured(p.id)}
             <button
               type="button"
-              onclick={() => selectProvider(p.id)}
+              onclick={() => (selectedTab = p.id)}
               class="relative px-3 py-2.5 rounded-xl text-[12px] font-semibold border transition-all duration-140 text-left
-                     {provider === p.id
+                     {selectedTab === p.id
                 ? 'bg-primary/10 text-primary border-primary/30 shadow-sm'
                 : 'bg-white/5 text-muted-foreground border-white/10 hover:bg-white/10 hover:text-foreground'}"
             >
-              <span class="block truncate">{p.label}</span>
-              <!-- Auth badge -->
-              <span class="mt-1 flex items-center gap-1">
-                {#if noAuth}
-                  <span
-                    class="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200"
-                  >
-                    <Lock class="w-2.5 h-2.5" />
-                    No auth
-                  </span>
-                {:else if oauthSupported}
+              <span class="flex items-center gap-2 mb-1 pr-2">
+                <ProviderIcon provider={p.id} />
+                <span class="truncate">{p.label}</span>
+              </span>
+
+              <span class="flex items-center gap-1 flex-wrap">
+                {#if configured}
                   <span
                     class="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
                   >
-                    <ShieldCheck class="w-2.5 h-2.5" />
-                    OAuth
+                    <CheckCircle2 class="w-2.5 h-2.5" />
+                    Configured
                   </span>
+                {/if}
+                {#if p.requiresKey}
                   <span
                     class="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"
                   >
@@ -233,10 +242,10 @@
                   </span>
                 {:else}
                   <span
-                    class="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200"
+                    class="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200"
                   >
-                    <KeyRound class="w-2.5 h-2.5" />
-                    API key only
+                    <Lock class="w-2.5 h-2.5" />
+                    No auth
                   </span>
                 {/if}
               </span>
@@ -245,136 +254,87 @@
         </div>
       </div>
 
-      <!-- OAuth support info banner -->
+      <!-- Auth info banner -->
       <div
         class="flex items-start gap-3 px-3.5 py-3 rounded-xl border text-[12px]
-               {supportsOAuth
-          ? 'bg-emerald-50/60 border-emerald-200/70 text-emerald-800'
-          : isOllamaProvider
-            ? 'bg-slate-50/60 border-slate-200/70 text-slate-600'
-            : 'bg-amber-50/60 border-amber-200/70 text-amber-800'}"
+                  {isOllama
+          ? 'bg-slate-50/60 border-slate-200/70 text-slate-600'
+          : 'bg-blue-50/60 border-blue-200/70 text-blue-800'}"
       >
-        {#if supportsOAuth}
-          <ShieldCheck class="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
-          <span>
-            <strong>OAuth 2.0 supported.</strong> You can authenticate with a Google
-            OAuth access token (via Google Cloud IAM) instead of an API key. Select
-            your preferred method below.
-          </span>
-        {:else if isOllamaProvider}
+        {#if isOllama}
           <Lock class="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
-          <span>
-            <strong>No authentication required.</strong> Ollama runs locally — no
-            API key or token needed.
-          </span>
+          <span
+            ><strong>No authentication required.</strong> Ollama runs locally — no
+            API key needed.</span
+          >
         {:else}
-          <XCircle class="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
-          <span>
-            <strong>OAuth not supported.</strong>
-            {selectedProvider.noOauthNote}
-          </span>
+          <KeyRound class="w-4 h-4 mt-0.5 shrink-0 text-blue-500" />
+          <span
+            ><strong>API key required.</strong> Your key is stored locally and
+            never sent anywhere except the {tabDef.label} API.</span
+          >
         {/if}
       </div>
-
-      <!-- Auth method selector (Gemini only) -->
-      {#if supportsOAuth}
-        <div class="space-y-2">
-          <Label class="text-sm font-semibold">Authentication Method</Label>
-          <div class="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onclick={() => (authMethod = "api_key")}
-              class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-[12px] font-semibold border transition-all duration-140
-                     {authMethod === 'api_key'
-                ? 'bg-primary/10 text-primary border-primary/30'
-                : 'bg-white/5 text-muted-foreground border-white/10 hover:bg-white/10'}"
-            >
-              <KeyRound class="w-3.5 h-3.5 shrink-0" />
-              API Key
-            </button>
-            <button
-              type="button"
-              onclick={() => (authMethod = "oauth_token")}
-              class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-[12px] font-semibold border transition-all duration-140
-                     {authMethod === 'oauth_token'
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                : 'bg-white/5 text-muted-foreground border-white/10 hover:bg-white/10'}"
-            >
-              <ShieldCheck class="w-3.5 h-3.5 shrink-0" />
-              OAuth Token
-            </button>
-          </div>
-        </div>
-      {/if}
 
       <!-- Model name -->
       <div class="space-y-2">
         <Label class="text-sm font-semibold">Model</Label>
         <Input
-          bind:value={model}
-          placeholder={selectedProvider.models[0]}
+          bind:value={states[selectedTab].model}
+          placeholder={tabDef.models[0]}
           class="bg-white/5 border-white/10 rounded-xl"
         />
         <p class="text-[10px] text-muted-foreground opacity-60">
-          Common models: {selectedProvider.models.join(", ")}
+          Common models: {tabDef.models.join(", ")}
         </p>
       </div>
 
-      <!-- API key / OAuth token input -->
-      {#if needsCredential && !isOllamaProvider}
+      <!-- API key input -->
+      {#if tabDef.requiresKey}
         <div class="space-y-2">
-          <Label class="text-sm font-semibold">
-            {authMethod === "oauth_token" ? "OAuth Access Token" : "API Key"}
-          </Label>
+          <Label class="text-sm font-semibold">API Key</Label>
           <div class="relative">
-            {#if authMethod === "oauth_token"}
-              <ShieldCheck
-                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500 opacity-60"
-              />
-            {:else}
-              <KeyRound
-                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground opacity-40"
-              />
-            {/if}
+            <KeyRound
+              class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground opacity-40"
+            />
             <Input
-              type={showApiKey && apiKeyEditing ? "text" : "password"}
-              value={hasApiKey && !apiKeyEditing ? "••••••••••••••••" : apiKey}
-              onfocus={() => (apiKeyEditing = true)}
+              type={tab.showApiKey ? "text" : "password"}
+              value={tab.apiKey}
+              onfocus={() => (states[selectedTab].apiKeyEditing = true)}
               onblur={() => {
-                if (!apiKey) apiKeyEditing = false;
+                if (!tab.apiKey) {
+                  states[selectedTab].apiKeyEditing = false;
+                  states[selectedTab].showApiKey = false;
+                }
               }}
               oninput={(e) => {
-                apiKey = (e.currentTarget as HTMLInputElement).value;
+                states[selectedTab].apiKey = (
+                  e.currentTarget as HTMLInputElement
+                ).value;
               }}
-              placeholder={authMethod === "oauth_token"
-                ? "Paste your Google OAuth access token"
-                : "Enter your API key"}
+              placeholder="Enter your API key"
               class="pl-10 pr-10 bg-white/5 border-white/10 rounded-xl font-mono text-[13px]"
             />
-            <button
-              type="button"
-              onclick={() => (showApiKey = !showApiKey)}
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {#if showApiKey}
-                <EyeOff class="w-4 h-4" />
-              {:else}
-                <Eye class="w-4 h-4" />
-              {/if}
-            </button>
+            {#if tab.hasApiKey || tab.apiKey}
+              <button
+                type="button"
+                onclick={() =>
+                  (states[selectedTab].showApiKey = !tab.showApiKey)}
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {#if tab.showApiKey}
+                  <Eye class="w-4 h-4" />
+                {:else}
+                  <EyeOff class="w-4 h-4" />
+                {/if}
+              </button>
+            {/if}
           </div>
-          {#if hasApiKey && !apiKeyEditing}
-            <div class="flex items-center gap-1.5 text-[11px] text-emerald-600">
-              <CheckCircle2 class="w-3 h-3" />
-              {authMethod === "oauth_token" ? "OAuth token" : "API key"} saved. Click
-              to replace.
-            </div>
-          {/if}
         </div>
       {/if}
 
       <!-- Ollama base URL -->
-      {#if isOllamaProvider}
+      {#if isOllama}
         <div class="space-y-2">
           <Label class="text-sm font-semibold">Ollama Base URL</Label>
           <div class="relative">
@@ -382,7 +342,7 @@
               class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground opacity-40"
             />
             <Input
-              bind:value={ollamaBaseUrl}
+              bind:value={states[selectedTab].ollamaBaseUrl}
               placeholder="http://localhost:11434"
               class="pl-10 bg-white/5 border-white/10 rounded-xl font-mono text-[13px]"
             />
@@ -395,16 +355,20 @@
 
       <!-- Actions -->
       <div class="flex gap-2 pt-2">
-        <Button onclick={save} disabled={saving || !model} class="rounded-xl">
-          {#if saving}
+        <Button
+          onclick={save}
+          disabled={tab.saving || !tab.model}
+          class="rounded-xl"
+        >
+          {#if tab.saving}
             <Loader2 class="w-4 h-4 mr-2 animate-spin" />
           {/if}
           Save
         </Button>
         <Button
           variant="ghost"
-          onclick={clear}
-          disabled={clearing}
+          onclick={clearProvider}
+          disabled={tab.clearing}
           class="rounded-xl text-muted-foreground hover:text-destructive"
         >
           <Trash2 class="w-4 h-4 mr-1.5" />

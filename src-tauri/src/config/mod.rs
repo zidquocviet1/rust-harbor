@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fs;
 
@@ -96,19 +97,54 @@ impl Default for AppConfig {
 
 // ── AI Configuration ──────────────────────────────────────────────────────────
 
+/// Config for a single provider (stored in the per-provider map).
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ProviderConfig {
+    pub model: String,
+    pub api_key: Option<String>,
+    pub ollama_base_url: Option<String>,
+    #[serde(default)]
+    pub auth_method: String,
+}
+
+/// Multi-provider config store written to disk.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AiConfigStore {
+    #[serde(default)]
+    pub active_provider: String,
+    #[serde(default)]
+    pub providers: HashMap<String, ProviderConfig>,
+}
+
+/// Flat config view used by the AI service internally.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AiConfig {
     pub provider: String,
     pub model: String,
     pub api_key: Option<String>,
     pub ollama_base_url: Option<String>,
-    /// Authentication method: "api_key" (default) or "oauth_token".
-    /// Only Gemini supports "oauth_token"; all other providers use "api_key".
     #[serde(default)]
     pub auth_method: String,
 }
 
-/// Safe public view of AiConfig — never exposes the raw API key or token.
+/// Public view of a single provider (includes raw key for local display).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProviderConfigPublic {
+    pub model: String,
+    pub api_key: Option<String>,
+    pub has_api_key: bool,
+    pub ollama_base_url: Option<String>,
+    pub auth_method: String,
+}
+
+/// Full public view returned to the frontend.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiConfigsPublic {
+    pub active_provider: String,
+    pub providers: HashMap<String, ProviderConfigPublic>,
+}
+
+/// Legacy single-provider public view (kept for AiSummaryPanel compatibility).
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiConfigPublic {
     pub provider: String,
@@ -118,53 +154,95 @@ pub struct AiConfigPublic {
     pub auth_method: String,
 }
 
-impl From<&AiConfig> for AiConfigPublic {
-    fn from(cfg: &AiConfig) -> Self {
-        Self {
-            provider: cfg.provider.clone(),
-            model: cfg.model.clone(),
-            ollama_base_url: cfg.ollama_base_url.clone(),
-            has_api_key: cfg.api_key.as_deref().map(|k| !k.is_empty()).unwrap_or(false),
-            auth_method: if cfg.auth_method.is_empty() {
-                "api_key".to_string()
-            } else {
-                cfg.auth_method.clone()
-            },
-        }
-    }
-}
-
 fn get_ai_config_path(app_handle: &tauri::AppHandle) -> crate::error::Result<PathBuf> {
     use tauri::Manager;
     let mut path = app_handle.path().app_config_dir()
         .map_err(|e| crate::error::Error::SystemError(format!("Failed to get config dir: {}", e)))?;
-
     if !path.exists() {
         fs::create_dir_all(&path)?;
     }
-
     path.push("ai-config.json");
     Ok(path)
 }
 
-pub fn load_ai_config(app_handle: &tauri::AppHandle) -> crate::error::Result<AiConfig> {
+/// Load the multi-provider store, migrating the old single-provider format if needed.
+pub fn load_ai_config_store(app_handle: &tauri::AppHandle) -> crate::error::Result<AiConfigStore> {
     let path = get_ai_config_path(app_handle)?;
-
     if !path.exists() {
-        return Ok(AiConfig::default());
+        return Ok(AiConfigStore::default());
     }
-
-    let content = fs::read_to_string(path)?;
-    serde_json::from_str(&content)
-        .map_err(|e| crate::error::Error::ConfigError(format!("Failed to parse AI config: {}", e)))
+    let content = fs::read_to_string(&path)?;
+    // Try new format first
+    if let Ok(store) = serde_json::from_str::<AiConfigStore>(&content) {
+        // New format has `providers` key; old format has `provider` key at root
+        if store.providers.is_empty() {
+            // Could be empty new-format OR old format — check for `provider` field
+            if let Ok(old) = serde_json::from_str::<AiConfig>(&content) {
+                if !old.provider.is_empty() {
+                    return Ok(migrate_old_config(old));
+                }
+            }
+        }
+        return Ok(store);
+    }
+    // Fall back to old format
+    if let Ok(old) = serde_json::from_str::<AiConfig>(&content) {
+        return Ok(migrate_old_config(old));
+    }
+    Ok(AiConfigStore::default())
 }
 
-pub fn save_ai_config(app_handle: &tauri::AppHandle, config: &AiConfig) -> crate::error::Result<()> {
+fn migrate_old_config(old: AiConfig) -> AiConfigStore {
+    let mut providers = HashMap::new();
+    if !old.provider.is_empty() {
+        providers.insert(old.provider.clone(), ProviderConfig {
+            model: old.model,
+            api_key: old.api_key,
+            ollama_base_url: old.ollama_base_url,
+            auth_method: old.auth_method,
+        });
+    }
+    AiConfigStore { active_provider: old.provider, providers }
+}
+
+pub fn save_ai_config_store(app_handle: &tauri::AppHandle, store: &AiConfigStore) -> crate::error::Result<()> {
     let path = get_ai_config_path(app_handle)?;
-    let content = serde_json::to_string_pretty(config)
+    let content = serde_json::to_string_pretty(store)
         .map_err(|e| crate::error::Error::ConfigError(format!("Failed to serialize AI config: {}", e)))?;
     fs::write(path, content)?;
     Ok(())
+}
+
+/// Returns the active provider's config as a flat AiConfig for use by the AI service.
+pub fn load_ai_config(app_handle: &tauri::AppHandle) -> crate::error::Result<AiConfig> {
+    let store = load_ai_config_store(app_handle)?;
+    let provider = store.active_provider.clone();
+    if let Some(pc) = store.providers.get(&provider) {
+        Ok(AiConfig {
+            provider,
+            model: pc.model.clone(),
+            api_key: pc.api_key.clone(),
+            ollama_base_url: pc.ollama_base_url.clone(),
+            auth_method: pc.auth_method.clone(),
+        })
+    } else {
+        Ok(AiConfig { provider, ..Default::default() })
+    }
+}
+
+pub fn ai_configs_to_public(store: &AiConfigStore) -> AiConfigsPublic {
+    AiConfigsPublic {
+        active_provider: store.active_provider.clone(),
+        providers: store.providers.iter().map(|(id, pc)| {
+            (id.clone(), ProviderConfigPublic {
+                model: pc.model.clone(),
+                api_key: pc.api_key.clone(),
+                has_api_key: pc.api_key.as_deref().map(|k| !k.is_empty()).unwrap_or(false),
+                ollama_base_url: pc.ollama_base_url.clone(),
+                auth_method: if pc.auth_method.is_empty() { "api_key".to_string() } else { pc.auth_method.clone() },
+            })
+        }).collect(),
+    }
 }
 
 fn get_config_path(app_handle: &tauri::AppHandle) -> crate::error::Result<PathBuf> {

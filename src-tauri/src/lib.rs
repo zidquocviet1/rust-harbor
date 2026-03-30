@@ -127,7 +127,11 @@ pub fn run() {
             pull_history::pull_history_count,
             pull_history::get_pull_history_storage_stats,
             ai_summary::get_ai_config,
+            ai_summary::get_ai_configs,
             ai_summary::save_ai_config_cmd,
+            ai_summary::save_provider_config,
+            ai_summary::set_active_provider,
+            ai_summary::clear_provider_config,
             ai_summary::generate_pull_summary,
         ])
         .run(tauri::generate_context!())
